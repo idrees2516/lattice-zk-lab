@@ -348,3 +348,112 @@ ProtogaLattice keeps exactly this randomization structure, but over ring element
 
 *(§3 continues in §3.9 with the Gröbner-basis machinery over $M=R_q[Y_1,\dots,Y_k]$ —
 completed below after the Section 5 reading pass.)*
+
+## 4. Relations (exact definitions)
+
+### 4.1 The accumulator relation Ξ^acc_{f,n,γ,1}
+Instance: (t, x^RP, β, e) with commitment t = A·w; witness w with ‖w‖₂ ≤ γ.
+Constraint: Σ_{i∈[n]} pow_i(β)·f_i(w) = e (mod q), where f: R_q^m → R_q^n is
+a degree-d polynomial map, β = (β₁..β_n) is the public power-vector, and the
+error accumulator e absorbs the folding drift. The lab models pow_i as the
+i-th component selector of the vector β + X·δ (see §5 below).
+
+### 4.2 The folding relation Ξ^fold_{f,n,B,1}
+The k fresh instances (t_j, x_j; w_j) share the accumulator's statement
+shape; the same-image requirement (Σ_i β*_i f_i(w_j) equal across j) is what
+makes Figure 2's H(Y) = F(α) + Σ KZ identity hold — implemented via the
+kernel construction in the lab (f acts on a subspace).
+
+### 4.3 The staircase ideal I and Ξ^rand × Ξ^k → Ξ (Figure 4)
+The Protogalaxy-style random folding: the challenge ladder β ∈ R_q^t with
+the power-monomial compression poly_i(β); the multivariate extension uses
+the ideal I = ⟨Z_{i,j} = Y_iY_j − Y_i⟩ (Definition 9) whose Gröbner theory
+(Pauer, D.1) yields the quotient-space reduction of §6.
+
+## 5. Protocols (full transcriptions of the figures)
+
+### 5.1 Figure 1 — the folding backbone
+Folding Range Proof + Relaxed-Folding architecture: fresh witnesses pass
+through a range proof (digit decomposition, norm bounds) into the relaxed
+folding relation; the accumulator chains via PGL-Fold, with PGL-Boot
+re-anchoring the norm when it reaches γ′ (the unbounded-composition trick).
+
+### 5.2 Figure 2 — PGL-Fold (implemented in lzk.protocols.protogalattice.PGL.fold_prove)
+1. ω_j := x_j^RP / w_j (the instance-witness ratio encoding; the lab folds
+   witnesses directly — documented simplification).
+2. δ ← C; δ-vector = (δ, δ², …, δ^n).
+3. F(X) := Σ_i pow_i(β + Xδ)·f_i(ω₀) — affine in X; the lab sends the two
+   coefficients (F_const, F_lin).
+4. α ← C; β*_i := β_i + α·δ^i.
+5. H(Y) := Σ_i pow_i(β*)·f_i(Σ_j L_j(Y)·ω_j) — degree d in the Y's.
+6. Compute (K_{rs}) with H(Y) = F(α) + Σ_{r≤s} K_{rs}(Y)·Z_{rs}(Y) — the
+   Gröbner division (lzk.core.groebner.divide).
+7. Verifier: check deg(K_{rs}) ≤ d−2; sample y ← C^k (y₀ := 1).
+8. Updates: w* = Σ_j L_j(y)w_j; t* = Σ L_j(y)t_j; x* = Σ L_j(y)x_j;
+   e* = Σ K_{rs}(y)Z_{rs}(y) + F(α).
+
+### 5.3 Figure 3 — PGL-Boot (implemented in PGL.boot_prove)
+1. Base-b decomposition: w = Σ_{j=0}^{k′−1} b^j·w_j (and x = Σ b^j x_j).
+2. Per digit: e_j := Σ_i pow_i(β)f_i(ω_j); commit t_j = A w_j.
+3. H(Y) := Σ_i pow_i(β)f_i(Σ_j L_j(Y)ω_j).
+4. Gröbner reduction: H(Y) = Σ_j L_j(Y)e_j + Σ_{r,s} Z_{rs}(Y)K_{rs}(Y).
+5. Verifier: deg(K) ≤ d−2; Σ b^j t_j = t; Σ b^j e_j = e + Σ Z(D)K(D) with
+   the evaluation tuple D satisfying L_j(D) = b^j (D_j = Σ_{ℓ≤j} b^ℓ).
+6. Fold at fresh y: c_j = L_j(y); w*/t*/x* linear; e* = Σ KZ(y) + Σ c_j e_j.
+Theorem 3: the output norm is γ = (2T(k′−1)+1)·b with b = ⌈(γ′−1)^{1/k′}⌉.
+
+### 5.4 Figure 4 — Protogalaxy-style random folding Ξ^rand × Ξ^k → Ξ
+The multivariate challenge ladder with the Gröbner-compressed verifier
+check; the lab's RingSC + Groebner division covers the same mechanics.
+
+## 6. Soundness & Security
+
+- **Proposition 1 (Gröbner basis of I)**: G = {Z_{i,j}, 0 ≤ j ≤ i ≤ k−1} is
+  a REDUCED Gröbner basis of I over M = R_q[Y] (Pauer's ring Gröbner theory,
+  D.1). Reduction rules: Y_i^a → Y_i (idempotence); Y_iY_j → Y_max(i,j)
+  (absorption) — every polynomial's normal form is affine linear
+  c₀ + Σ c_iY_i, the quotient M/I is free of rank k+1, and division gives
+  UNIQUE (K_{rs}, R) with deg(K) ≤ deg(P)−2. Implemented + verified in
+  lzk.core.groebner (division identity, normal-form shape, degree bound,
+  Theorem-1 membership tests).
+- **Theorem 1**: f(Σ L_j w_j) − Σ L_j f(w_j) ∈ I — the deviation of a
+  degree-d map at the L-combination collapses into the ideal (the products
+  L_jL_j′ reduce via idempotence: L_j(1−L_j) ≡ 0). This is why the verifier
+  only needs the K_{rs} quotients + a degree check.
+- **Theorem 2/3 (fold/boot soundness)**: knowledge soundness with error
+  k/|C| (challenge space) + the SIS binding of the commitments; the norm
+  ladder is controlled by the small challenge set C (lab:
+  ring.challenge_small).
+
+## 7. Parameters & Concrete Efficiency
+Paper Table 1 (proof sizes ~ tens of KB per fold at 128-bit security,
+improving LatticeFold+/Neo/Cyclo); Table 2 comparison vs prior lattice
+folding. Lab: q = 12289, n = 8, k = 2, degree-2 f, base b = 4.
+
+## 8. Implementation Notes
+- The MPoly layer works over Z_q with the constant-coefficient embedding of
+  ring elements (scalar sub-case); full ring-element coefficients need a
+  module-valued MPoly — documented gap.
+- The same-statement requirement (equal β*-weighted f-images) is realized
+  via kernel-structured f-maps in the tests.
+- The RP-protocol encoding (ω = x/w) is flattened to direct witness folding.
+
+## 9. Implementation Status (Gap Ledger)
+
+- **P0-1..P0-3** (setting, relations, backbone): ✅ implemented
+  (lzk.protocols.protogalattice: PolyMap, Accumulator, fresh_accumulator).
+- **P0-4** (ring-Gröbner reduction module): ✅ **fully implemented** —
+  lzk.core.groebner: the explicit reduced Gröbner basis of Proposition 1,
+  the deterministic division with quotient extraction and the deg ≤ d−2
+  bound, the L-basis of Lemma 4, verified against 20 random polynomials +
+  the reduction-rule unit tests.
+- **P0-5** (PGL-Fold + PGL-Boot end-to-end with e*-style error
+  bookkeeping): ✅ **fully implemented** — fold_prove/fold_verify (Figure 2
+  complete: δ/α challenges, F(X), β*, H(Y), K_{rs} with degree checks,
+  L-basis updates, e* = ΣKZ(y) + F(α)) and boot_prove/boot_verify
+  (Figure 3 complete: base-b decomposition with recomposition check,
+  per-digit errors, the D-tuple evaluation checks Σb^jt_j = t and
+  Σb^je_j = e + ΣZ(D)K(D), norm re-anchoring). Tamper tests: F_const
+  modification rejected. Fold-after-boot composition demonstrated.
+- Simplifications: scalar-embedded f coefficients; witness-direct folding
+  instead of the ω = x/w RP-encoding; uniform challenge replay for y₀.

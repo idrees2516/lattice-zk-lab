@@ -845,4 +845,17 @@ $\approx+1.69\times$ per doubling); degree sensitivity is tiny (tens of constrai
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The multi-cast union-polynomial commitment (union_commit: the arity
+  hypercube mixing) and the recursive accumulation fold with the
+  γ-ladder keeping the accumulator interface constant
+  (accumulate_fold chained across steps).
+- □ Not implemented: the eq-anchored partial-evaluation sumcheck with the
+  division event, the CV compression ladder, the 2μ+1-oracle interface
+  preservation checks, the SPS interleaving.
+
+**(replacing the placeholder)**
+
+- DONE: the multi-cast union-polynomial commitment (union_commit: the arity hypercube mixing) and the recursive accumulation fold with the gamma-ladder keeping the accumulator interface constant (accumulate_fold chained across steps).
+- NOT implemented: the eq-anchored partial-evaluation sumcheck with the division event, the CV compression ladder, the (2 mu + 1)-oracle interface preservation checks, the SPS interleaving.

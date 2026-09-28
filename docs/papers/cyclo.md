@@ -598,4 +598,15 @@ tests/test_cyclo_*.py
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The fold with the PARTIAL range check (pay-per-bit): the cross term's
+  high bits checked via digit decomposition, the low residual joining the
+  norm sumcheck (fold_with_partial_range + verify_partial_range).
+- □ Not implemented: the full constraint-system folding (AIR-level), the
+  Neo pay-per-bit bit-level accounting, the comparison vs LatticeFold+.
+
+**(replacing the placeholder)**
+
+- DONE: the fold with the PARTIAL range check (pay-per-bit): the cross term's high bits checked via digit decomposition, the low residual joining the norm sumcheck (fold_with_partial_range + verify_partial_range).
+- NOT implemented: the full constraint-system folding (AIR-level), the Neo pay-per-bit bit-level accounting, the comparison vs LatticeFold+.

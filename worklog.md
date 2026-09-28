@@ -216,3 +216,29 @@ Work Log:
 Stage Summary:
 - Core engine + HyperWolf complete and verified. Next: RoKoko (7.13), SALSAA
   (A2-A5), ProtogaLattice (P0-4/P0-5), remaining 10 protocols, Wave 8.
+
+---
+Task ID: 5-8 (remaining protocols + Wave 8 + docs + push)
+Agent: main (Super Z)
+Task: 10 remaining protocol modules, Wave 8 productionization, documentation, GitHub push
+
+Work Log:
+- Protocol modules: latticefold_plus (fold+range+norm), twistshout (one-hot/Shout/Twist
+  PIOPs), labinius (GF(2^k) tower PCS), akita (tensor commit + row fold), cyclo
+  (partial range), pikkufold (LRP stack), quasar (union-poly accumulation), serval
+  (split-fold IPA quartet), symphony (arity-4 folding), hachi (ring-switch norm).
+  Fixed during bring-up: GF2E reflected ops (char-2), Shout claim = plain one-hot
+  dot product, Akita gamma replay, norm wraparound (Goldilocks for norm-heavy tests).
+- Wave 8: pytest suite (8 modules, AST-migrated from scripts, all green), CI
+  (.github/workflows/ci.yml, py3.10/3.12), benchmark harness + docs/BENCHMARKS.md
+  (HyperWolf Table-2 model within 1%), serialization module, README, LICENSE,
+  pyproject packaging.
+- Docs: completed protogalattice.md §4-9 (Figures 2/3 transcriptions, Prop 1
+  mechanics, gap ledger with P0-4/P0-5 status); gap ledgers filled in all 15 paper
+  docs; salsa_probe.md written; docs/GAP_LEDGER.md consolidated; docs/ARCHITECTURE.md
+  (the in-depth architecture: core engine internals, per-protocol mechanics,
+  cross-cutting invariants, HyperWolf data flow).
+
+Stage Summary:
+- Full lab: 14 protocol modules + core engine, 8 green test modules, benchmarks,
+  ~12,400 lines of paper analysis docs with accurate gap ledgers. Ready to push.

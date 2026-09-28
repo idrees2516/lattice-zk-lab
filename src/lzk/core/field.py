@@ -180,9 +180,20 @@ class GF2E:
         self.field = field
 
     def __add__(self, other):
+        if isinstance(other, int):
+            return GF2E(self.value ^ (other & 1), self.field)
         return GF2E(self.value ^ other.value, self.field)
 
-    __sub__ = __add__
+    __sub__ = __add__  # characteristic two: -x = x
+
+    def __radd__(self, other):
+        return self + other
+
+    def __rsub__(self, other):
+        return self + other  # char 2: a - b = a + b
+
+    def __rmul__(self, other: int):
+        return self * other
 
     def __mul__(self, other):
         if isinstance(other, int):

@@ -906,4 +906,44 @@ Verifier per round: $O((257+\kappa)\cdot b)$ ring ops for checks 1–2, $O(\kapp
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+*(replacing the placeholder)*
+
+- **W1** (ring + gadget + challenge core): ✅ — q ≡ 5 mod 8 lab primes
+  (32/61-bit), balanced gadget digits with the carry-rebalance fix +
+  headroom digit (the greedy signed-digit recursion fails on ~3% of
+  negatives — see module docstring), Labrador sampler with op-norm
+  rejection (SVD), σ_{-1}/M_R/ct-identity.
+- **W2** (witness layer): ✅ — hypercube container with row-major D
+  flattening (outermost slowest), fold engine (Eq. 4), a₀ expansion with
+  the §8.4-1 pairing rule; fold == direct evaluation verified for k = 2..4,
+  univariate + multilinear.
+- **W3** (commitment layer): ✅ — Protocol 2 commit pipeline (ring-pack →
+  balanced digits → hypercube → tiled Ajtai A^{(l)} via block sums → outer
+  B-binding on the digit stack); open/commit round-trip tested.
+- **W4** (core protocol): ✅ — Protocol 1 full driver: per-round fold
+  messages, JL projections with the (jl_rows/2)β² norm bound, round-0
+  outer-commitment binding (B^{(k)}G^{-1} stack form), cross-round
+  projection consistency, statement updates (y ← ⟨fold, C⟩,
+  cm_out ← BG^{-1}(ΣCᵢc_min)), final s^(1) reveal with the four closing
+  checks. Attack tests: wrong-y, tampered-fold, tampered-c_min rejected.
+- **W5** (PCS + benchmarks): ✅ — Protocol 3 eval wrapper (uni + multi),
+  paper_params() + the Table-2 size model (81.2/181.6 KB vs 80.28/180.59
+  reported — within 1%).
+- Documented deviations: (1) rounds r ≥ 1 outer-binding uses the
+  statement-chain form B G^{-1}(ΣCᵢc_min) = cm_out (the paper's own
+  completeness narrative; the literal per-round re-decomposition is not
+  digit-additive); (2) jl_rows configurable (64 in tests) with the check
+  constant jl_rows/2 preserving the JL margin; (3) β-ladder uses the
+  conservative √(2T) growth with T = 15; (4) s^(1) sent at full ring width
+  (pitfall 10).
+
+**(replacing the placeholder)**
+
+- **W1** (ring + gadget + challenge core): DONE — q = 5 mod 8 lab primes (32/61-bit), balanced gadget digits with the carry-rebalance fix + headroom digit (the greedy signed-digit recursion fails on ~3% of negatives), Labrador sampler with op-norm rejection (SVD), sigma_{-1}/M_R/ct-identity.
+- **W2** (witness layer): DONE — hypercube container with row-major D flattening (outermost slowest), fold engine (Eq. 4), a0 expansion with the 8.4-1 pairing rule; fold == direct evaluation verified for k = 2..4, univariate + multilinear.
+- **W3** (commitment layer): DONE — Protocol 2 commit pipeline (ring-pack -> balanced digits -> hypercube -> tiled Ajtai A^(l) via block sums -> outer B-binding on the digit stack); open/commit round-trip tested.
+- **W4** (core protocol): DONE — Protocol 1 full driver: per-round fold messages, JL projections with the (jl_rows/2) beta^2 norm bound, round-0 outer-commitment binding, cross-round projection consistency, statement updates (y <- <fold, C>, cm_out <- B G^{-1}(sum C_i c_min)), final s^(1) reveal with the four closing checks. Attack tests: wrong-y, tampered-fold, tampered commitments rejected.
+- **W5** (PCS + benchmarks): DONE — Protocol 3 eval wrapper (uni + multi), paper_params() + the Table-2 size model (81.2/181.6 KB vs 80.28/180.59 reported — within 1%).
+- Documented deviations: (1) rounds r >= 1 outer-binding uses the statement-chain form B G^{-1}(sum C_i c_min) = cm_out (the paper's own completeness narrative; the literal per-round re-decomposition is not digit-additive); (2) jl_rows configurable (64 in tests) with the check constant jl_rows/2 preserving the JL margin; (3) beta-ladder uses the conservative sqrt(2T) growth with T = 15; (4) s^(1) sent at full ring width (pitfall 10).

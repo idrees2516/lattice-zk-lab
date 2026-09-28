@@ -599,4 +599,15 @@ Suggested staging for the implementer: (1) `tensor_rings`+`monomial` with Lemma 
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The high-arity (arity-4) folding accumulation with challenge vectors
+  and the multi-round composition (compose_rounds) — folding used as a
+  black box without hash-in-circuit (the ROM composition shape).
+- □ Not implemented: the full ROM SNARK wrapper (the random-oracle
+  argument), the PCD/IVC instantiation, concrete numbers.
+
+**(replacing the placeholder)**
+
+- DONE: the high-arity (arity-4) folding accumulation with challenge vectors and the multi-round composition (compose_rounds) — folding used as a black box without hash-in-circuit (the ROM composition shape).
+- NOT implemented: the full ROM SNARK wrapper (the random-oracle argument), the PCD/IVC instantiation, concrete numbers.

@@ -635,4 +635,16 @@ tests/test_labinius_*.py
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The GF(2^k) tower field arithmetic (lzk.core.field), the φ-style
+  binary packing, the MLE-opening sumcheck over the tower field (the
+  Π_left-exp/Π_fold collapse), the field-switch reduction structure.
+- □ Not implemented: the binary lattice commitment over the tower (the
+  paper's small-coefficient decoupling), the within-word/word-crossing
+  claim split, the block constraint system with carries (Figure 5).
+
+**(replacing the placeholder)**
+
+- DONE: the GF(2^k) tower field arithmetic (lzk.core.field), the phi-style binary packing, the MLE-opening sumcheck over the tower field (the Pi_left-exp / Pi_fold collapse), the field-switch reduction structure.
+- NOT implemented: the binary lattice commitment over the tower (the paper's small-coefficient decoupling), the within-word/word-crossing claim split, the block constraint system with carries (Figure 5).

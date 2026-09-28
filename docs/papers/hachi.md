@@ -628,4 +628,16 @@ server + ~130 ms Greyhound tail + poly($\lambda$) trace checks ≈ 227–315 ms 
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The HMZ ring-switch structure instantiated as the degree-2 norm
+  sumcheck with extension-slot evaluation claims (ring_switch_prove /
+  ring_switch_verify with the balanced-trace check).
+- □ Not implemented: the F_{q^k} slot machinery (the paper's private
+  quotient + H₀/Hα checks), the trace-packing bijection ψ, the §4.5
+  recursion without re-decomposition, the Greyhound tail handoff.
+
+**(replacing the placeholder)**
+
+- DONE: the HMZ ring-switch structure instantiated as the degree-2 norm sumcheck with extension-slot evaluation claims (ring_switch_prove / ring_switch_verify with the balanced-trace check).
+- NOT implemented: the F_{q^k} slot machinery (the paper's private quotient + H0/H-alpha checks), the trace-packing bijection psi, the 4.5 recursion without re-decomposition, the Greyhound tail handoff.

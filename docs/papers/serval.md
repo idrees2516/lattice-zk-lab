@@ -970,4 +970,16 @@ verifier dominates favorably; prover overhead ratio is stable, driven by $\ell$.
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The split-and-fold IPA engine with the quadratic cross-term quartet
+  (L, M1, M2, R per round) and the exact-norm bookkeeping
+  (t' = c²L + c·c'·M1 + c'·c·M2 + c'²R — the slack-free ℓ2 semantics).
+- □ Not implemented: the leveled commitment with intermediate states, the
+  binary sub-proof with the 5 claims, Algorithm 1 sampler, LaBRADOR
+  compaction, the wraparound regime q > 2Nℓd.
+
+**(replacing the placeholder)**
+
+- DONE: the split-and-fold IPA engine with the quadratic cross-term quartet (L, M1, M2, R per round) and the exact-norm bookkeeping (t' = c^2 L + c c' M1 + c' c M2 + c'^2 R — the slack-free l2 semantics).
+- NOT implemented: the leveled commitment with intermediate states, the binary sub-proof with the 5 claims, Algorithm 1 sampler, LaBRADOR compaction, the wraparound regime q > 2 N l d.

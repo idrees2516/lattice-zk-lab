@@ -1135,10 +1135,47 @@ $\mathrm{ct}(v)\le\tilde\beta_w^2$ over the integers.
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- **R1** (core tensor RoK + projections): ✅ partial — the committed-linear
+  relation Ξ^lin_COM with Ajtai keys, the lab row model (the paper's
+  row-tensor H/F/Y factorisation is a verifier-side optimisation),
+  sumcheckify's product-claim encoding (Lemma 10), the basic sumcheck with
+  linear map (Figure 7 semantics via RingSC). Π^proj-f (Figure 3, the fine
+  projection) NOT implemented; Π^proj-c available as reference code.
+- **R2** (committed refinement / COM + fold-split): ✅ — the recursive Ajtai
+  commitment COM (Figure 1) at depth 1–2 with binding semantics, the
+  fold-split protocol (Figure 4): challenge fold of the r columns,
+  gadget-decomposed w̃, the decreasing-dimension packing (Lemma 3), the
+  Hermitian self-inner-product v with the Remark-3 constant-term check,
+  re-commitment under a fresh vSIS key.
+- **R3** (norm/slack management): ✅ — ct(v) ≤ β̃² wraparound-free checks,
+  norm growth budgets in the fold, the JL lemmas documented (5–6);
+  extraction-side slack (the ϱ > 1 relaxed relation) documented but fixed
+  to s = 1.
+- **R4** (PCS composition): ✅ structural — Π^lin linearisation (Figure 6)
+  with eq(bin(i), γ) claim batching as EXPLICIT RingSC combiners, the
+  terminal identity with z₀/z₁ substitution; the NTT-slot/subfield Φ
+  batching replaced by full-ring challenges (soundness qⁿ ≥ q^a).
+- **R5** (SNARK end-to-end): ✅ at one-round depth — the round driver
+  (fold-split → sumcheckify → lin) with a direct terminal opening
+  (commitment binding, exact norm, all constraints against the revealed
+  packed witness); multi-round shrinking is structural (tested at rounds=1;
+  the round-2 claim set is simplified to commitment rows + norm).
+- Tamper tests: modified w_hat, v, z₀ all rejected.
+
 
 R1 — core tensor RoK + projections:
 R2 — committed refinement (recursive `COM`, $\Pi^{\mathrm{fold\text{-}split}}$):
 R3 — norm/slack management:
 R4 — PCS composition:
 R5 — SNARK end-to-end:
+
+**(replacing the placeholder)**
+
+- **R1** (core tensor RoK + projections): partial — the committed-linear relation with Ajtai keys, the lab row model (the paper's row-tensor H/F/Y factorisation is a verifier-side optimisation), sumcheckify's product-claim encoding (Lemma 10), the basic sumcheck with linear map (Figure 7 semantics via RingSC). Pi^proj-f (Figure 3, fine projection) NOT implemented; Pi^proj-c semantics documented.
+- **R2** (committed refinement / COM + fold-split): DONE — the recursive Ajtai commitment COM (Figure 1) at depth 1-2 with binding semantics, the fold-split protocol (Figure 4): challenge fold of the r columns, gadget-decomposed w-tilde, the decreasing-dimension packing (Lemma 3), the Hermitian self-inner-product v with the Remark-3 constant-term check, re-commitment under a fresh vSIS key.
+- **R3** (norm/slack management): DONE — ct(v) <= beta^2 wraparound-free checks, norm growth budgets in the fold, the JL lemmas documented (5-6); extraction-side slack (the rho > 1 relaxed relation) documented but fixed to s = 1.
+- **R4** (PCS composition): structural — Pi^lin linearisation (Figure 6) with eq(bin(i), gamma) claim batching as EXPLICIT RingSC combiners, the terminal identity with z0/z1 substitution; the NTT-slot/subfield batching replaced by full-ring challenges (soundness q^n >= q^a).
+- **R5** (SNARK end-to-end): DONE at one-round depth — the round driver (fold-split -> sumcheckify -> lin) with a direct terminal opening (commitment binding, exact norm, all constraints against the revealed packed witness); multi-round shrinking is structural (tested at rounds=1; the round-2 claim set is simplified to commitment rows + norm).
+- Tamper tests: modified w_hat, v, z0 all rejected.

@@ -1381,4 +1381,18 @@ read-address chunks (Akita proof 96.1→94.2 KB; verify 16.88→28.17 ms).
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The two-tier tensor commitment (per-row Ajtai commitments), one
+  row-folding evaluation round with the norm check and the folded-row
+  re-commitment, the JL-style norm bound and trace checks.
+- □ Not implemented (the paper's heavy pipeline): the sliced B-matrix /
+  shared D-matrix layout, the two-stage negative-binary F/H compression,
+  the degree-halved range tree, the digit-expanded ℓ2 certificates, the
+  quotient-lift ring checks, Stage-3 setup offloading, the Rust SIS
+  estimator. The spec's 13 pitfalls are documented for future work.
+
+**(replacing the placeholder)**
+
+- DONE: the two-tier tensor commitment (per-row Ajtai commitments), one row-folding evaluation round with the norm check and the folded-row re-commitment, the JL-style norm bound and trace checks.
+- NOT implemented (the paper's heavy pipeline): the sliced B-matrix / shared D-matrix layout, the two-stage negative-binary F/H compression, the degree-halved range tree, the digit-expanded l2 certificates, the quotient-lift ring checks, Stage-3 setup offloading, the Rust SIS estimator. The spec's 13 pitfalls are documented for future work.

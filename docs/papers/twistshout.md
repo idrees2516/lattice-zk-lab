@@ -775,4 +775,19 @@ group op = 6 field ops.
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ Shout core PIOP (d=1): the lookup sumcheck Σ MLE[W]·MLE[A] = v with
+  one-hot selectors; the one-hot encoding check (Booleanity + Hamming
+  weight via Σ MLE[A]² = 1); non-one-hot rejection tested.
+- ✅ Twist read-checking (batched per-step claims with transcript
+  combiners in one degree-2 sumcheck over the address hypercube).
+- □ Not implemented: the write-checking + increment PIOP (Inc = wa·(wv−Val)),
+  the LT-weighted virtual values, the sparse prover optimizations
+  (A/C-array aggregation, K2^m binding, partial-sum trees), SpeedySpartan.
+
+**(replacing the placeholder)**
+
+- DONE: Shout core PIOP (d=1): the lookup sumcheck sum MLE[W] MLE[A] = v with one-hot selectors; the one-hot encoding check (Booleanity + Hamming weight via sum MLE[A]^2 = 1); non-one-hot rejection tested.
+- DONE: Twist read-checking (batched per-step claims with transcript combiners in one degree-2 sumcheck over the address hypercube).
+- NOT implemented: the write-checking + increment PIOP (Inc = wa(wv - Val)), the LT-weighted virtual values, the sparse prover optimizations (A/C-array aggregation, K2^m binding, partial-sum trees), SpeedySpartan.

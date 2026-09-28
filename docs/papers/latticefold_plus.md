@@ -701,4 +701,23 @@ Every "derive" point is a distinct challenge; the ordering of Steps 3–5 encode
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The sumcheck layer (§5.0) — the shared RingSC engine implements the
+  generic ring sumcheck exactly (coefficient-form round messages,
+  g(0)+g(1) checks, Horner running claims, bind recursion, the
+  two-parallel-execution and batching modes via explicit combiners).
+- ✅ Construction 5.1 folding (fold + linear constraint folding + cross-term
+  tracking) and the norm-check composition (Π_rgchk → Π_cm norm path).
+- ✅ The range-check instantiation (Construction 4.4 style): base-b digit
+  decomposition with recomposition checks + degree-2/3 monomial sumchecks.
+- □ Not implemented: the double-commitment split map (Construction 4.1),
+  the full EXP(D_f) monomial-set machinery, ZK masking, the R1CS→R_lin
+  reduction of Figure 1 (Appendix A chain documented in the spec).
+
+**(replacing the placeholder)**
+
+- DONE: the sumcheck layer (5.0) — the shared RingSC engine implements the generic ring sumcheck exactly (coefficient-form round messages, g(0)+g(1) checks, Horner running claims, bind recursion, the two-parallel-execution and batching modes via explicit combiners).
+- DONE: Construction 5.1 folding (fold + linear constraint folding + cross-term tracking) and the norm-check composition (the Pi_rgchk -> Pi_cm norm path).
+- DONE: the range-check instantiation (Construction 4.4 style): base-b digit decomposition with recomposition checks + degree-2/3 monomial sumchecks.
+- NOT implemented: the double-commitment split map (Construction 4.1), the full EXP(D_f) monomial-set machinery, ZK masking, the R1CS-to-R_lin reduction of Figure 1 (Appendix A chain documented in the spec).

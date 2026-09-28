@@ -703,4 +703,16 @@ Absorb order (domain-separated labels; every derive point is a distinct challeng
 
 ## 9. Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- ✅ The layered random projection stack (sparse per-layer projections with
+  small challenges, geometrically shrinking images, the short final image)
+  and the fold-with-LRP flow (fold_lrp/verify_lrp with the norm check).
+- □ Not implemented: the exact projection-verification algebra (the
+  tensor-of-sparse-matrices fast verification), the 5.7 KB communication
+  profile (paper-scale), the comparison suite vs SALSAA/Cyclo.
+
+**(replacing the placeholder)**
+
+- DONE: the layered random projection stack (sparse per-layer projections with small challenges, geometrically shrinking images, the short final image) and the fold-with-LRP flow (fold_lrp/verify_lrp with the norm check).
+- NOT implemented: the exact projection-verification algebra (the tensor-of-sparse-matrices fast verification), the 5.7 KB communication profile (paper-scale), the comparison suite vs SALSAA/Cyclo.

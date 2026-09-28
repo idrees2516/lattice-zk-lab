@@ -1194,4 +1194,44 @@ log q = O(log m).)
 
 ## 9 Implementation Status (Gap Ledger)
 
-*(to be filled by implementer)*
+## 9. Implementation Status (Gap Ledger)
+
+- **A1** (Π_sum + Π_batch core): ✅ — the RingSC engine
+  (lzk.core.ringsc) implements the generalized ring sumcheck (LF+ §5.0
+  layer / Π_sum's round machinery) with coefficient-form messages,
+  transcript challenges and explicit protocol combiners; Π_batch's
+  power-ladder row folding (fold_rows with c^i weights).
+- **A2** (Π_norm+): ✅ — norm_conjugate_inner (the O(m) direct conjugate
+  inner product — the paper's prover-efficiency trick vs RPS/RnR's
+  O(m log m) convolution commitment), the balanced-trace check
+  (Tr(t) ≤ nβ²), the degree-2 sumcheck, the full Π_norm+ composition with
+  Π_mle row appends (norm_plus_prove/norm_plus_verify). Cheat test:
+  tampered t rejected.
+- **A3** (Π_bin + staircase): ✅ — Π_bin (Figure 5): t = ⟨w, 1°−w⟩ with
+  Trace(t)=0 (Lemma 4.11's orthogonality argument — non-binary witnesses
+  rejected in tests); the staircase RoK (Figure 6): the block-bidiagonal
+  system with the c-ladder batched row d = Σc^ρA_ρ + c^{m̄+ρ}B_ρ, the
+  geometric step powers p_j = (c^{m̄})^j, the target
+  s = c₀·Y₀ + c^{K·m̄}c₀·Y₁, the degree-3 product sumcheck. Tamper: wrong s
+  rejected.
+- **A4** (VDF application): ✅ — the Papercraft-style chain
+  w_i = G^{-1}(−y_i), y_{i+1} = Aw_i as a BINARY STAIRCASE ([G;A]
+  block-bidiagonal, m̄=1) + Π_bin on the flat digit chain
+  (vdf_prove/vdf_verify); wrong-output rejection tested.
+- **A5** (committed-AIR folding): ✅ — Π_air (Figure 7): V = [W, shift(W)],
+  the transition claim Σ eq(η,z)(1−eq(z,1))f(MLE[V])(z) = 0, the shift
+  claim with the (θ^m − 1)eq(z,1) wrap correction, boundary claims, all in
+  one batched degree-3 sumcheck with column openings; the folding step
+  (linear fold + β growth) with folded-constraint verification.
+- Simplifications: CRT-slot/subfield u-batching replaced by full-ring
+  challenges; the tensor row-matrix F-factor structure flattened to rows;
+  the Ξ^lin-⊗ interface carried by the lab instance model.
+
+**(replacing the placeholder)**
+
+- **A1** (Pi_sum + Pi_batch core): DONE — the RingSC engine (lzk.core.ringsc) implements the generalized ring sumcheck with coefficient-form messages, transcript challenges and explicit protocol combiners; Pi_batch's power-ladder row folding (fold_rows with c^i weights).
+- **A2** (Pi_norm+): DONE — norm_conjugate_inner (the O(m) direct conjugate inner product — the paper's prover-efficiency trick vs RPS/RnR's O(m log m) convolution commitment), the balanced-trace check (Tr(t) <= n beta^2), the degree-2 sumcheck, the full Pi_norm+ composition with Pi_mle row appends (norm_plus_prove/norm_plus_verify). Cheat test: tampered t rejected.
+- **A3** (Pi_bin + staircase): DONE — Pi_bin (Figure 5): t = <w, 1deg - w> with Trace(t)=0 (Lemma 4.11's orthogonality argument — non-binary witnesses rejected in tests); the staircase RoK (Figure 6): the block-bidiagonal system with the c-ladder batched row d = sum c^rho A_rho + c^{mbar+rho} B_rho, the geometric step powers p_j = (c^{mbar})^j, the target s = c0.Y0 + c^{K mbar} c0.Y1, the degree-3 product sumcheck. Tamper: wrong s rejected.
+- **A4** (VDF application): DONE — the Papercraft-style chain w_i = G^{-1}(-y_i), y_{i+1} = A w_i as a BINARY STAIRCASE ([G;A] block-bidiagonal, mbar=1) + Pi_bin on the flat digit chain (vdf_prove/vdf_verify); wrong-output rejection tested.
+- **A5** (committed-AIR folding): DONE — Pi_air (Figure 7): V = [W, shift(W)], the transition claim sum eq(eta,z)(1-eq(z,1)) f(MLE[V])(z) = 0, the shift claim with the (theta^m - 1) eq(z,1) wrap correction, boundary claims, all in one batched degree-3 sumcheck with column openings; the folding step (linear fold + beta growth) with folded-constraint verification.
+- Simplifications: CRT-slot/subfield u-batching replaced by full-ring challenges; the tensor row-matrix F-factor structure flattened to rows; the Xi^lin-otensor interface carried by the lab instance model.
