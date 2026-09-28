@@ -1,2 +1,7 @@
 skills/
 node_modules/
+papers_txt/
+upload/
+download/
+db/
+*.db
