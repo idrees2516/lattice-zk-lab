@@ -201,6 +201,16 @@ class Ring:
             self,
         )
 
+    def challenge_small(self, transcript, label: str = "", bound: int = 2) -> "RingElt":
+        """Sample a SHORT ring element (each centred coefficient in
+        (-bound, bound]) from the transcript — the papers' small challenge
+        set C (Labrador-style), controlling norm growth across folds."""
+        coeffs = []
+        for i in range(self.n):
+            v = transcript.challenge_range(-bound, bound + 1, label=f"{label}:s{i}")
+            coeffs.append(v % self.q)
+        return RingElt(coeffs, self)
+
     # ------------------------------------------------------------- norms etc #
     @staticmethod
     def center(v: int, q: int) -> int:
