@@ -1,0 +1,603 @@
+        Polynomial-Time Key-Recovery Attack on the NIST
+                      Specification of PROV
+
+                             River Moreira Ferreira and Ludovic Perret
+
+                       Sorbonne Université, CNRS, LIP6, F-75005, Paris, France
+
+                     river.moreira-ferreira@lip6.fr, ludovic.perret@lip6.fr
+
+
+
+       Abstract. In this paper, we present an efficient attack against PROV, a recent variant of
+       the popular Unbalanced Oil and Vinegar (UOV) multivariate signature scheme, that has
+       been submitted to the ongoing NIST standardization process for additional post-quantum
+       signature schemes. A notable feature of PROV is its proof of security, namely, existential
+       unforgeability under a chosen-message attack (EUF-CMA), assuming the hardness of solving
+       the system formed by the public-key non-linear equations. We present a polynomial-time
+       key-recovery attack against the first specification of PROV (v1.0). To do so, we remark that
+       a small fraction of the PROV secret-key is leaked during the signature process. Adapting
+       and extending previous works on basic UOV, we show that the entire secret-key can be then
+       recovered from such a small fraction in polynomial-time. This leads to an efficient attack
+       against PROV that we validated in practice. For all the security parameters suggested by
+       the authors of PROV, our attack recovers the secret-key in at most 8 seconds. We conclude
+       the paper by discussing the apparent mismatch between such a practical attack and the
+       theoretical security claimed by PROV designers. Our attack is not structural but exploits
+       that the current specification of PROV differs from the required security model. A simple
+       countermeasure makes PROV immune against our attack and led the designers to update the
+       specification of PROV (v1.1).
+
+       Keywords: Post-quantum · NIST PQC · Cryptanalysis · Key-Recovery
+
+
+
+1      Introduction
+In 2022, the National Institute of Standards and Technology (NIST) selected the first post-quantum
+cryptographic standards after five years of competition. In particular, three digital signature
+schemes (DSS) relying either on structured lattices (Dilithium [16] and Falcon [13]) or hash
+functions (SPHINCS+ [10]) have been selected for standardization. NIST also decided to start a
+new standardization process for additional post-quantum DSS to increase the diversity of hardness
+assumptions. From a practical point of view, the new call was especially targeting schemes with
+“short signature” and “fast verification” [1].
+Such practical features are typical of multivariate schemes. As such, UOV [11] appears today as the
+most appealing candidate such that round-1 candidates of the new NIST standardization process [1]
+includes about 8 UOV-based DSS1 . A promising candidate among these UOV-variants is the PRovable
+Unbalanced Oil and Vinegar (PROV) that includes a strong security argument with an EUF-CMA
+security proof under the hardness assumption of solving PROV public-key multivariate equations.
+Until now, no security weakness has been reported against PROV.
+
+1.1     Organization of the Paper and Main Results
+We organize the paper as follows. In Section 2, we introduce the necessary notations, mathematical
+objects, and the security framework used in PROV. In Section 3, we recall the PROV signature scheme
+as defined in the NIST-specification v1.0 [6]. Also, we extend the new Kipnis-Shamir attack on UOV
+1
+    https://csrc.nist.gov/Projects/pqc-dig-sig/round-1-additional-signatures
+of [14] to PROV, which recovers the secret-key in polynomial-time for small parameters. Section 4
+describes our attack: Sections 4.1 and 4.2 details a polynomial-time key-recovery attack against
+PROV specification v1.0 (Theorem 1). To do so, we exploit the fact that a small fraction of the
+secret-key is leaked during the signature generation. Then, we extend to the specific characteristics
+of PROV results from [14,2] on UOV demonstrating that the entire secret-key can be then recovered
+from this small leakage. The attack has a polynomial-time complexity and is also very efficient
+in practice. In Section 4.3, we present experimental results and show that the secret key can be
+recovered in a few seconds for all security levels (Table 2). Section 4.4 discusses a simple tweak
+that prevents this attack and reestablishes the validity of the security model used in [6]. The
+vulnerability was reported to the designers of PROV who then updated the specification (v1.1, [7])
+with this countermeasure.
+
+Acknowledgement
+We thank Pierre Pébereau, who helped us with some technical details of his attack and imple-
+mentation [14]. Before publishing this work, we informed the authors of PROV that confirmed the
+flaw and released quickly a new specification (v.1.1). We would like to thank them for the con-
+structive discussions. The second author would like to thank Google which partially supported
+this work thanks to a gift dedicated to post-quantum research. Also, we acknowledge the financial
+support of the French Ministère des Armées - Agence de l’innovation de défense on this research.
+Finally, the authors thanks the financial support on this research by QuanTEdu-France project
+(ANR-22-CMAS-0001) as part of France 2030.
+
+
+2     Preliminaries
+2.1    Notations
+Let q be a prime or a prime power (for PROV, q = 28 ). We denote by bold lowercase (resp. capital)
+letter any column vector v ∈ Fnq of size n in Fq or respectively any matrix M ∈ Fn×m     q     of size
+n × m in Fq . In particular, let 0n be the zero column vector of size n in Fq , 0n×m be the zero
+matrix of size n × m in Fq and 1n be the n-by-n identity matrix in Fq . For a set of vector
+b = (b1 , . . . , bm ) ∈ (Fnq )m , we denote by span(b) ⊂ Fnq the linear span of b. Also, we express
+the kernel of a matrix M ∈ Fn×m    q    or a linear map f respectively by Ker(M) and Ker(f ). For the
+complexity analysis, we consider ω the exponent of matrix multiplication where 2 ≤ ω ≤ 3.
+The function Upper takes as input a square matrix A = {ai,j }1≤i,j≤n and outputs an upper
+triangular matrix Upper(A) = {bi,j }1≤i,j≤n such that bi,j = ai,j + aj,i if i < j, bi,j = ai,j if i = j
+or bi,j = 0 otherwise. We refer by the symbol || either the concatenation of two bit-strings or the
+horizontal concatenation of two matrices depending on the context. Let ∅ be the empty set, i.e.
+the set with no element.
+Let Fq [x1 , . . . , xn ] be the ring of multivariate polynomials in n variables with coefficients over
+Fq . In this work,     every quadratic polynomial p ∈ Fq [x1 , . . . , xn ] will be homogeneous, i.e.
+p λ (x1 , . . . , xn ) = λ2 p(x1 , . . . , xn ), for all λ ∈ F∗q . The polar form p∗ : Fnq × Fnq → Fq of a
+homogeneous quadratic polynomial p ∈ Fq [x1 , . . . , xn ] is a bi-linear and symmetric function de-
+fined as p∗ (x, y) := p(x, y) − p(x) − p(y) for all x, y ∈ Fnq . Any homogeneous quadratic polynomial
+p ∈ Fq [x1 , . . . , xn ] can be uniquely represented as p(x) = x⊺ Qx, where Q ∈ Fn×n        q    is an upper
+triangular matrix, and the corresponding polar form as p∗ (x, y) = x⊺ (Q + Q⊺ )y with x, y ∈ Fnq . A
+multivariate quadratic map P : Fnq → Fm           q is defined by a set of multivariate quadratic polynomials
+(p1 , . . . , pm ) ∈ Fq [x1 , . . . , xn ]m .
+
+2.2    Security framework of PROV
+Here, we recall the definition of a Weak Preimage-Sampleable Function (WPSF) used in the security
+analysis of PROV [6].
+
+
+                                                     2
+Definition 1 (WPSF [6]). A WPSF T consists of four probabilistic polynomial-time algorithms:
+ • Gen: this algorithm takes as input a security parameter 1λ and outputs a function F : X → Y
+   with a trapdoor I;
+ • F: this algorithm takes as input a value x ∈ X and deterministically outputs F(x);
+ • I = (I1 , I2 ): the algorithm I1 takes no input and outputs a value z ∈ Z; the algorithm I2 takes
+   as input z ∈ Z, y ∈ Y, and outputs x ∈ X such that F(x) = y, or outputs ⊥ if it failed;
+ • SampDom: this algorithm takes as input a function F : X → Y and outputs a value x ∈ X .
+The Preimage Sampling (PS) security of a WPSF is defined as:
+Definition 2 (PS security [6]). Let T be a WPSF. The advantage of an adversary A against
+the PS security of T is defined as:
+                                           h        i      h        i
+                                               A               A
+                          AdvPST  (A) = Pr   PS0 = 1  − Pr   PS1 = 1
+
+where PS0 and PS1 are the security games defined in Figure 1.
+
+                PSb                     Sample0                      Sample1
+                                  λ            1
+                (F, I) ← Gen(1 )        zi ← I ()                    xi ← SampDom(F)
+                b∗ ← ASampleb (F)       repeat                       Return xi
+                           ∗                  $
+                Return b                  yi ← Y
+                                          xi ← I2 (zi , yi )
+                                        until xi ̸= ⊥ Return xi
+
+                                        Fig. 1: PS security games.
+
+
+
+3     Description of PROV
+PRovable Unbalanced Oil and Vinegar (PROV) is a new signature scheme [6] submitted to the
+recent NIST standardization process for additional post-quantum signature schemes [1]. As several
+multivariate schemes submitted to this standardization process, PROV is a variant of the Unbalanced
+Oil and Vinegar (UOV) multivariate signature scheme [11].
+PROV uses the the recent definition of UOV introduced by W. Beullens in [5] in combination with an
+efficient variant of the so-called salt-UOV [15], a provably secure variant of UOV. In [5], the traditional
+UOV trapdoor [11] is rephrased as the vanishing subspace of a multivariate quadratic map.
+Definition 3. Let P : Fnq → Fm                                           n
+                              q be a multivariate quadratic map and O ⊂ Fq be a linear subspace.
+We shall say that O is a vanishing subspace of P if :
+
+                                          ∀o ∈ O, P(o) = 0m .
+
+From a high-level point of view, the public-key in PROV is given by the multivariate quadratic map
+P : Fnq → Fm                                                                  n
+           q and the corresponding secret-key is a vanishing subspace O ⊂ Fq of dimension m + δ
+with δ ≥ 1. The main specificity of PROV is related to the parameter δ that allows a more efficient
+reduction than salt-UOV [15]. From now on, we set v = n − m − δ.
+
+3.1    Key-Generation in PROV
+In order to generate a PROV key pair (Definition 3) (P, O) with P : Fnq → Fm  q and a vanishing
+subspace O ⊂ Fnq of dimension m + δ with δ ≥ 1, [6] suggests to first generate a random basis of
+O in systematic form, i.e. namely a basis of the form :
+
+                               (O⊺ 1m+δ ) ∈ F(m+δ)×n
+                                             q       , with O ∈ Fv×(m+δ)
+                                                                 q       .                             (1)
+
+
+                                                       3
+Then, the components p1 , . . . , pm ∈ Fq [x1 , . . . , xn ] of P : Fnq →
+                                                                        − Fm
+                                                                           q are constructed as follows :
+                                                                    !
+                                                      (1)       (2)
+                                                  Pi          Pi
+              pi (x) = x⊺ Pi x, Pi =                            (3)   ∈ Fn×n
+                                                                         q   , ∀i, 1 ≤ i ≤ m,             (2)
+                                             0(m+δ)×v Pi
+                                    (1)                                            (2)      v×(m+δ)
+with x = (x1 , . . . , xn ) ∈ Fnq , Pi ∈ Fv×v
+                                          q    be an upper triangular matrix, Pi ∈ Fq        be a ma-
+                                                   
+          (3)                       ⊺ (1)     ⊺ (2)      (m+δ)×(m+δ)
+trix and Pi = Upper −O Pi O − O Pi                    ∈ Fq            The linear subspace O generated
+as in (1) is a vanishing subspace of the map defined by the polynomials (2).
+
+3.2      Signature Verification and Generation
+The PROV signature for a message msg ∈ {0, 1}∗ is given by a vector s ∈ Fnq and a fixed-length bit
+string salt ∈ {0, 1}lensalt such that
+                                      P(s) = H(msg||salt),
+where H : {0, 1}∗ → Fm                     2
+                      q is a hash function .
+The PROV trapdoor is based on the result below, demonstrating that the knowledge of the vanishing
+subspace allows one to compute a valid signature by solving a linear system.
+                               v×(m+δ)
+Lemma 1. Let O ∈ Fq                    , P : Fnq → Fm        be represented with matrices (P1 , . . . , Pm ) ∈
+                                                       q     
+   n×n m                                   v                O                                     (m+δ)
+(Fq ) as defined in (2), v̄ =                     , ō =          o ∈ Fnq , with v ∈ Fvq and o ∈ Fq      . For
+                                         0m+δ              1m+δ
+all h = (h1 , . . . , hm ) ∈ Fm
+                              q , it holds that :
+
+                                                                      (1)
+                      P(v̄ + ō) = h ⇐⇒           v⊺ Si o = hi − v⊺ Pi v, ∀ i, 1 ≤ i ≤ m,
+               (1)      (1)⊺         (2)       v×(m+δ)
+with Si = (Pi        + Pi      )O + Pi     ∈ Fq          .
+In order to generate a signature of msg ∈ {0, 1}∗ , the signer generates a random pair (v, salt) ∈
+Fvq ×{0, 1}lensalt and solves the corresponding linear system of Lemma 1 with h = H(msg||salt) ∈ Fm
+                                                                                                  q .
+If the linear system has no solution, then the signer samples a new salt ∈ {0, 1}lensalt and solves
+the new system. The process is repeated until a solution exists. Finally, he recovers the signature
+s = v̄ + ō ∈ Fnq , with v̄, ō ∈ Fnq as in Lemma 1. We detail the PROV signature generation in
+Algorithm 1.
+
+Remark 1. Note that the vector ō belongs in the secret vanishing subspace O of the public key.
+Given a matrix A ∈ Fm×n q    , and vector b ∈ Fm
+                                               q , the algorithm LinSolve outputs the set of all
+               n
+solutions x ∈ Fq of the linear system Ax = b.
+
+3.3      Security of PROV
+An appealing feature of PROV lies in its security proof where existential forgery under chosen
+message attacks (EUF-CMA) can be reduced to the problem of inverting the public-key polynomials
+defined as follows:
+Definition 4 (UOV− problem). Let p = (p1 , . . . , pm ) ∈ Fq [x1 , . . . , xn ]m be quadratic polynomials
+                                                                                 −
+corresponding to a PROV public-key and d = (d1 , . . . , dm ) ∈ Fm
+                                                                 q . The UOV problem asks to find a
+solution to the non-linear system of equations :
+                                           p1 − d1 = 0, . . . , pm − dm = 0.
+As discussed in [6], the best approaches known for solving the UOV− problem are generic tech-
+niques for solving non-linear equations and then exponential in the classical and quantum settings
+[3,4,9,8].
+2
+    Precisely, in [6], they generate h as H(4||hpk||msg||salt) where hpk is a hash of the public key and a
+    secret seed. We omit this detail to simplify the presentation.
+
+
+                                                             4
+ Algorithm 1: PROV Signing
+                                  v×(m+δ)
+     Data: The secret key O ∈ Fq          , the public key (P1 , . . . , Pm ) ∈ (Fn×n
+                                                                                  q   )m and a message
+           msg ∈ {0, 1}∗ .
+     Result: The signature (s, salt) ∈ Fn
+                                        q × {0, 1}
+                                                   lensalt
+                                                           of message msg.
+       $
+ 1 v ← Fvq
+ 2 S ←∅
+ 3 while S = ∅ do
+             $
+ 4    salt ← {0, 1}lensalt
+ 5    (h1 , . . . , hm ) ← H(msg||salt)
+ 6    for i from 1 to m do
+                           (1)    (1)⊺  (2)
+ 7         ai ← v⊺ ((Pi + Pi )O + Pi )
+                              (1)
+ 8         b i = hi − v ⊺ P i v
+ 9    end
+10    A := (a⊺1 || . . . ||a⊺m )⊺
+11    b := (b1 || . . . ||bm )⊺
+12    S ← LinSolve(A, b)
+13 end
+       $
+14 o←S
+                      
+          v          O
+15 s ←          +          o
+         0m+δ       1m+δ
+16 Return (s, salt)
+
+3.4        Kipnis-Shamir Attack when n ≤ 2m and δ ≥ 1
+In [12], Kipnis and Shamir introduced a polynomial-time key-recovery attack on Oil and Vinegar
+signature scheme (when n = 2m and δ = 0). This attack has been improved in [14] when n ≤ 2m
+and δ = 0. Here, we extend this attack to PROV when n ≤ 2m and δ ≥ 1. First, let recall a special
+property of the polar form of a PROV key pair.
+
+Lemma 2 ([14]). Let P : Fnq → Fm                                                    n
+                                            q be a multivariate quadratic map, O ⊂ Fq be a vanishing
+                         ∗
+subspace of P and P : Fq × Fq → Fq be the polar form of P. Then, for all (o1 , o2 ) ∈ O 2 , we
+                                n     n      m
+
+have P ∗ (o1 , o2 ) = P ∗ (o2 , o1 ) = 0m .
+This characteristic restricts the rank of the matrices representing the polar form for large dimen-
+sional vanishing subspace.
+
+Corollary 1. Let p ∈ Fq [x1 , . . . , xn ] be a homogeneous polynomial represented as p(x) = x⊺ Px
+with P ∈ Fn×n
+           q   and x ∈ Fnq , O ⊂ Fnq be a vanishing subspace of p with dim(O) = m + δ. Then, the
+rank of the matrix P′ = (P + P⊺ ) ∈ Fqn×n is at most 2n − 2(m + δ).
+This proof combines ideas of [14] but is provided for the sake of correctness and completeness.
+                      n×(m+δ)
+Proof. Let B1 ∈ Fq       be a basis of O and B̂ ∈ Fn×n
+                                                    q   be a basis of Fnq such that B̂ = (B1 ||B2 )
+with B2 ∈ Fn×v
+             q  . By Lemma 2, we obtain B⊺1 P′ B1 = 0m . Therefore, the matrix P′ in the basis B̂
+have the following form                                     
+                                             0(m+δ)×(m+δ) C1
+                               B̂⊺ P′ B̂ =
+                                                  C2      C3
+                 (m+δ)×v          v×(m+δ)
+with C1 ∈ Fq         , C2 ∈ Fq        and C3 ∈ Fv×vq  . Then, the rank of the matrix B̂⊺ P′ B̂ is at
+most 2n − 2(m + δ) because of the block of zero of size m + δ in the top left. Since the rank of a
+matrix is invariant by change of basis, this proves the rank of P′ is at most 2n − 2(m + δ).      ⊔
+                                                                                                  ⊓
+In [14], the author exploits this rank default to recover a basis of the vanishing subspace by com-
+puting the kernel of the matrices P′i ∈ Fn×n
+                                          q    representing the polar form based on the assumption
+that Ker(P′i ) ⊂ O with high probability for key pair obtained with PROV key-generation. In the
+next lemma, we precise the condition underlying this assumption.
+
+
+                                                       5
+Lemma 3. Let p ∈ Fq [x1 , . . . , xn ] be a homogeneous polynomial represented as p(x) = x⊺ Px with
+P ∈ Fn×n
+      q   , O ⊂ Fnq be a vanishing subspace of p with dim(O) = m + δ and p∗ : Fnq × Fnq → Fq
+be the polar form of p. If there exist no subspace V ⊂ Fnq with dimension m + δ + r for any
+1 ≤ r ≤ n − m − δ where for all pairs (v1 , v2 ) ∈ V , p∗ (v1 , v2 ) = 0 then Ker(P′ ) ⊂ O where
+P′ = P + P⊺ .
+
+Proof. Let assume Ker(P′ ) ̸⊂ O. Therefore, there exists a vector x ∈ Ker(P′ ) such that x ∈   / O.
+Since O is a vector space in a finite field and x ∈
+                                                  / O, then we have span(x) ̸⊂ O and dim(span(x)) =
+1. Consider the vector space V defined by the closure of span(x) and O under the addition and
+the scalar multiplication. The linear subspace V is of dimension m + δ + 1 because x ∈   / O. Also,
+let two vectors v1 and v2 of V that can be expressed as v1 = o1 + x1 and v2 = o2 + x2 with o1 ,
+o2 ∈ O and x1 , x2 ∈ span(x). If we evaluate the polar p∗ on v1 and v2 , we obtain
+
+                        p∗ (v1 , v2 ) = o⊺1 P′ o2 + x⊺1 P′ o2 + o⊺1 P′ x2 + x⊺1 P′ x2 .
+
+By Lemma 2, we deduce o⊺1 P′ o2 = 0. Also, the matrix P′ is symmetric, therefore Ker(P′ ) =
+Ker(P′⊺ ). This implies x⊺1 P′ = 0⊺n and P′ x2 = 0n because span(x) ⊂ Ker(P′ ). We conclude
+p∗ (v1 , v2 ) = 0 for any vector v1 and v2 of V . This prove by absurd than Ker(P′ ) ⊂ O because V
+is of dimension strictly larger than O.                                                          ⊔
+                                                                                                 ⊓
+
+Now, we extend the polynomial-time key-recovery attack of [14] to PROV where n ≤ 2m and δ ≥ 1.
+
+
+Lemma 4 (Kipnis-Shamir attack – Kernel Approach). Let P : Fnq → Fm                  q be a PROV
+public-key, O ⊂ Fnq be the vanishing subspace of P with dim(O) = m + δ and δ ≥ 1 obtained
+with PROV key-generation (Sub-Section 3.1). Then, there exists an algorithm that recovers a basis
+      n×(m+δ)
+B ∈ Fq        of O in time O(mnω ) with high probability when n ≤ 2m.
+
+Proof. Let (P1 , . . . , Pm ) ∈ (Fn×n
+                                  q   )m be the matrices representing the PROV public-key P. By
+corollary 1, we deduce the rank of the matrix Pi + P⊺i is at most 2n − 2(m + δ) for 1 ≤ i ≤ m.
+Since we clearly have −2m ≤ −n, it follows that 2n − 2m − 2δ ≤ n − 2δ. Also, we know −2δ ≤ −2,
+therefore we obtain 2n−2m−2δ ≤ n−2. This implies the kernel of Pi +P⊺i is at least of dimension
+2 because rank(Pi + P⊺i ) ≤ n − 2 for 1 ≤ i ≤ m. We assume the condition of Lemma 3 is satisfied
+with high probability, therefore we have Ker(Pi + P⊺i ) ⊂ O for 1 ≤ i ≤ m. Since the m kernels
+of the polar form are at least of dimension 2 and m + δ ≤ 2m, an adversary recovers a basis of
+O with high probability by computing the m random kernels for key pair obtained with PROV key
+generation. Finally, computing these kernels takes time O(mnω ). This concludes the proof.     ⊔
+                                                                                               ⊓
+
+
+4     Polynomial-Time Attack against PROV Specification
+4.1    Overview
+Our attack relies on the fact that the (vinegar) vector v ∈ Fvq is leaked and constant in the PROV
+specification v1.0 [6]. More precisely, the designers described a probabilistic signature generation,
+similar to Algorithm 1, only for “ease of exposition”. In practice, they deterministically gener-
+ate v as H(3||msg) where H is the hash function SHAKE256. We emphasize that the reference
+implementation generates the vinegar vector v ∈ Fvq similarly.
+The vinegar vector (and the corresponding signature) leaks information about the secret-key,
+precisely it reveals one vector in the secret linear subspace O ⊂ Fnq . Recently, [2] demonstrated an
+efficient attack allowing recovery of the entire secret-key from such a vector. Soon after in [14], it
+was proposed an even more efficient polynomial-time key-recovery attack on UOV using elementary
+linear algebra. In the next part, we adapt this key-recovery attack on PROV.
+
+
+                                                      6
+4.2      Description of the Attack
+First, we explain why the PROV specification leaks one vector in the secret linear subspace.
+Let (v, s) ∈ Fvq × Fnq be a pair of a vinegar vector and a signature3 for the message msg ∈ {0, 1}∗
+and the PROV key pair (P, O) with P : Fnq → Fm                     n
+                                                      q and O ⊂ Fq . We recall than s = v̄ + ō where
+  ⊺      ⊺     ⊺         n             n
+v̄ = (v ||0m+δ ) ∈ Fq and ō ∈ Fq . As discussed above, the pair (v, s) is public. Therefore, any
+adversary can compute a vector in the secret linear subspace ō = s − v̄ ∈ O (see Remark 1).
+In the following, we focus on the key-recovery attack assuming the knowledge of one non-zero
+vector in the linear subspace. Also, we assume that n ≤ 3m (this statement holds for concrete
+parameters proposed in the PROV submission, see Table 1) and that the rank of the matrices
+(P1 + P⊺1 , . . . , Pm + P⊺m ) defined as in (2) is n. Now, we present an adaption of the attack from
+[14] to the PROV case (see Remark 2).
+Lemma 5. Let P : Fnq → Fm                                          n
+                                  q be a PROV public-key, O ⊂ Fq be the vanishing subspace of P where
+                                                          n×n m
+P are represented with matrices (P1 , . . . , Pm ) ∈ (Fq ) defined as in (2). Let o ∈ O \ {0} and
+Jo (z) = (o⊺ (P1 + P⊺1 )z, . . . , o⊺ (Pm + P⊺m )z) with z = (z1 , . . . , zn ) a vector of variables. Then, the
+subspace Ker(Jo ) is a (n − m)-dimensional subspace with high probability and always satisfies
+                                                 O ⊂ Ker(Jo ).
+Proof. Let P ∗ : Fnq ×Fnq → Fm                                         ∗            ∗        ∗
+                             q be the polar form of P with components p1 , . . . , pm where pi (y, z) =
+ ⊺        ⊺
+y (Pi + Pi )z for all 1 ≤ i ≤ m. By Lemma 2, for all x ∈ O.
+                                          p∗i (o, x) = 0, ∀1 ≤ i ≤ m.
+This implies that the kernel of the linear application p∗i,o (z) = o⊺ (Pi + P⊺i )z contains O. By
+hypothesis, all the matrices (P1 + P⊺1 , . . . , Pm + P⊺m ) are of rank n and o ̸= 0n , therefore p∗i,o (z)
+is non-zero. Since the linear map is non-zero, its kernel is a hyperplane. We have shown that
+O ⊂ Ker(p∗i,o ), for all 1 ≤ i ≤ m. Therefore, we obtain :
+                                           \
+                                    O⊂            Ker(p∗i,o ) = Ker(Jo )
+                                             1≤i≤m
+
+Also, the hyperplanes are non-parallel, because we have O ⊂ Ker(p∗i,o ) for all 1 ≤ i ≤ m. Finally,
+the hyperplanes (i.e. the vectors o⊺ (P1 + P⊺1 ), . . . , o⊺ (Pm + P⊺m ) ∈ F1×n
+                                                                            q   ) are linearly independent
+with high probability for key pair obtained with PROV key-generation.4 . Therefore, the intersection
+of the m hyperplanes has dimension n − m. This concludes the proof.                                     ⊔
+                                                                                                        ⊓
+Remark 2. In [14], the authors consider finite fields of odd characteristics and exploit the bijective
+relation p = 2−1 p∗ between any quadratic homogeneous polynomial p ∈ Fq [x1 , . . . , xn ] and its polar
+form p∗ : Fnq × Fnq → Fq . Therefore, any homogeneous quadratic polynomial p ∈ Fq [x1 , . . . , xn ]
+can be represented with a symmetric matrix M ∈ Fn×n      q    such that p(x) = x⊺ Mx. However, a
+                      ⊺
+polynomial p(x) = x Mx with a symmetric matrix M is either linear or zero in a finite field of
+characteristic two (as with PROV). In other words, the bijective relation does not hold for finite fields
+of characteristic two (as discussed in [14,17]). Therefore, we need to slightly adapt the approach
+from [14] by considering the polar form of the public-key and not by exploiting a symmetric
+representation of the public-key as in [14].
+The next step is then essentially similar to [14, Theorem 7], namely we restrict the public-key poly-
+nomials on Ker(Jo ) and obtain new polynomial with fewer variables and the same secret vanishing
+subspace O. The secret-key can be recovered in polynomial-time from these new polynomials.
+Theorem 1. Let P : Fnq → Fm                                 n
+                              q be a PROV public-key, O ⊂ Fq be the vanishing subspace of P with
+dim(O) = m + δ where δ ≥ 1 and P be represented by matrices (P1 , . . . , Pm ) ∈ (Fqn×n )m defined as
+                                                                               
+in (2). Then, there exists an adversary A taking as input (P1 , . . . , Pm ), o ∈ (Fn×n
+                                                                                    q   )m × O \ {0}
+that outputs a basis of O in polynomial-time with high probability.
+3
+    The salt is irrelevant for the attack, therefore we ignore it.
+4
+    We verify in practice that this statement holds true.
+
+
+                                                        7
+The proof is similar to [14] but again provided for the sake of correctness and completeness.
+
+Proof. Let Jo (z) = (o⊺ (P1 + P⊺1 )z, . . . , o⊺ (Pm + P⊺m )z) with z = (z1 , . . . , zn ) a vector of variables.
+                                                             n×(n−m)
+By Lemma 5, O ⊂ Ker(Jo ) for which a basis B ∈ Fq                      can be computed in O(nω ), with
+2 ≤ ω ≤ 3 the matrix multiplication exponent. Then, we restrict the public-key polynomials to
+Ker(Jo ). This yields :
+                               Pi,Ker(Jo ) = B⊺ Pi B, ∀ i, 1 ≤ i ≤ m.
+                                           (n−m)
+The restricted public-key PKer(Jo ) : Fq           → Fm                                        ω
+                                                      q can be computed in polynomial-time O(mn )
+                                                                         (n−m)×(n−m)
+and be represented with matrices P1,Ker(Jo ) , . . . , Pm,Ker(Jo ) ∈ Fq        is a PROV public key
+with parameters (q, n − m, m, δ) because O ⊂ Ker(Jo ). Let Ō ⊂ Fn−m    q be the vanishing subspace
+of PKer(Jo ) with dim(Ō) = m + δ. With our assumption n ≤ 3m, we obtain n − m ≤ 2m. The
+                                                             (n−m)×(m+δ)
+attack described in Lemma 4 recovers a basis C ∈ Fq                        of the secret subspace Ō in time
+O(mnω ). Then, for all i with 1 ≤ i ≤ m, we have
+
+                  (BC)⊺ Pi BC = C⊺ (B⊺ Pi B)C = C⊺ Pi,Ker(Jo ) C = 0(m+δ)×(m+δ) .
+
+                                n×(m+δ)
+Namely, the matrix BC ∈ Fq          is a basis of O. Multiplying these matrices takes time O(nω )
+and concludes the proof that the secret-key can be recovered in O(mnω ).                       ⊔
+                                                                                               ⊓
+
+Remark 3. Our attack recovers the secret-key in polynomial-time with only one signature. How-
+ever, an adversary can directly recover the secret-key with multiple signatures because we can
+view the PROV signature generation as an oracle of vectors in O. Precisely, an adversary would
+recover uniformly distributed vectors in O for signature requests on uniformly distributed mes-
+sages (because the linear systems will be uniformly distributed, see Remark 1 of [6]). Therefore,
+an equivalent secret-key (i.e. m + δ linearly independent vectors of O) can be recovered in a small
+amount of signature requests.
+
+
+4.3     Experimental results
+In this part, we show that our attack is not only efficient from a theoretical point of view but
+also very practical. To do so, we implemented the attack (Theorem 1) in Sagemath5 [18] (taking
+as reference the code used in [14]) with the parameters of PROV suggested in [6] (Table 1). The
+non-zero vector of the vanishing subspace of the public key is generated with an oracle since such
+vector is leaked in PROV specification (Sub-Section 4.2).
+                                     Variant   λ q n            m     δ  v
+                                      PROV-I 128 256 136        46    8 82
+                                     PROV-III 192 256 200       70    8 122
+                                     PROV-V 256 256 264         96    8 160
+
+                        Table 1: Parameter sets of the PROV signature scheme.
+
+
+We estimate the performance of the implementation on a single thread of a laptop with an Intel
+CPU i7-1365U at 5.2GHz and with 32GB of RAM. In Table 2, we report the experimental results
+obtained. To summarize, we recover the secret-key of PROV in a few seconds for every security
+level.
+                                 Variant      PROV-I       PROV-III    PROV-V
+                                  Time        1.78.s        4.72.s      7.93s
+
+                                  Table 2: Key-recovery attack of PROV.
+
+5
+    Our implementation is available at https://github.com/River-Moreira-Ferreira/prov-attack
+
+
+                                                       8
+4.4    Countermeasure
+Before presenting the countermeasure, we briefly recall the security model used PROV. One idea of
+the proof is to model the PROV signature scheme as a weak preimage-sampleable function (WPSF)
+(Definition 1), denoted TPROV , such as :
+
+ • The algorithm (pk, sk) ← Gen is the PROV key-generation;
+ • The algorithm F evaluates the PROV public-key;
+ • The algorithm SampDom uniformly generates a value in Fnq ;
+ • The pair of algorithms I = (I1 , I2 ) are defined as follows:
+    • The algorithm I1 outputs a uniformly distributed vector v ∈ Fvq ;
+    • The algorithm I2 takes as input (pk, sk, v, y) with v ∈ Fvq and y ∈ Fm   q , performs one
+      iteration of the while loop in the signature generation (see Algorithm 1) for the given
+      vector v and outputs a PROV signature s ∈ Fnq for h = y or ⊥ if the iteration failed.
+
+One can remark that the model assumes, in particular, that the vinegar vector should be uniform
+and kept secret to the adversary in PS security of TPROV (see Definition 2). Precisely, in the PS0
+game, the adversary has access to the oracle Sample0 (both described in Figure 1). The oracle
+Sample0 keeps secret the value zi ← I1 used for I2 from the adversary A. Also, the algorithm I1
+uniformly generates the vector zi ∈ Fvq for TPROV .
+The specification of PROV v.1.0 differs from this model as the vinegar vector, which corresponds
+to a value zi ∈ Fvq , is leaked during signature generation and constant.
+The countermeasure appears evident when knowing this flaw in the security model: the vinegar
+vector should be uniformly generated and kept secret. This tweak will prevent an adversary from
+recovering easily a vector in the secret linear subspace with the previous strategy and makes PROV
+immune against our polynomial-time key-recovery attack.
+For example, we can suggest generating the vector v as H(3||ssk ||msg) where ssk is the secret
+seed uniformly generated during the key-generation (this was the strategy followed by others UOV
+candidates to the ongoing NIST standardization process). We will obtain a deterministic signature
+generation, as desired in the PROV specification.
+Finally, we have reported this vulnerability to the designers of PROV and they updated the speci-
+fication (v1.1, [7]) with such countermeasure.
+
+
+References
+ 1. NIST. Call for Additional Digital Signature Schemes for the Post-Quantum Cryptography Standard-
+    ization Process.
+ 2. Thomas Aulbach, Fabio Campos, Juliane Krämer, Simona Samardjiska, and Marc Stöttinger. Sepa-
+    rating oil and vinegar with a single trace side-channel assisted kipnis-shamir attack on UOV. IACR
+    Trans. Cryptogr. Hardw. Embed. Syst., 2023(3):221–245, 2023.
+ 3. Luk Bettale, Jean-Charles Faugère, and Ludovic Perret. Hybrid approach for solving multivariate
+    systems over finite fields. J. Math. Cryptol., 3(3):177–197, 2009.
+ 4. Luk Bettale, Jean-Charles Faugère, and Ludovic Perret. Solving polynomial systems over finite fields:
+    improved analysis of the hybrid approach. In Joris van der Hoeven and Mark van Hoeij, editors,
+    International Symposium on Symbolic and Algebraic Computation, ISSAC’12, Grenoble, France - July
+    22 - 25, 2012, pages 67–74. ACM, 2012.
+ 5. Ward Beullens. Improved cryptanalysis of UOV and Rainbow. In Anne Canteaut and François-Xavier
+    Standaert, editors, EUROCRYPT 2021, Part I, volume 12696 of LNCS, pages 348–373. Springer,
+    Heidelberg, October 2021.
+ 6. Benoit Cogliati, Jean-Charles Faugère, Pierre-Alain Fouque, Louis Goubin, Robin Larrieu, Gilles
+    Macario-Rat, Brice Minaud, and Jacques Patarin. PROV: Provable unbalanced Oil and Vinegar speci-
+    fication v1.0 – 06/01/2023.
+ 7. Benoit Cogliati, Jean-Charles Faugère, Pierre-Alain Fouque, Louis Goubin, Robin Larrieu, Gilles
+    Macario-Rat, Brice Minaud, and Jacques Patarin. PROV: Provable unbalanced Oil and Vinegar speci-
+    fication v1.1 – 19/02/2024.
+
+
+                                                    9
+ 8. Andre Esser, Javier A. Verbel, Floyd Zweydinger, and Emanuele Bellini. ttcryptographicestimators: a
+    software library for cryptographic hardness estimation. IACR Cryptol. ePrint Arch., page 589, 2023.
+ 9. Jean-Charles Faugère, Kelsey Horan, Delaram Kahrobaei, Marc Kaplan, Elham Kashefi, and Ludovic
+    Perret. Fast quantum algorithm for solving multivariate quadratic equations. Cryptology ePrint
+    Archive, Paper 2017/1236, 2017. https://eprint.iacr.org/2017/1236.
+10. Andreas Hülsing, Daniel J. Bernstein, Christoph Dobraunig, Maria Eichlseder, Scott Fluhrer, Stefan-
+    Lukas Gazdag, Panos Kampanakis, Stefan Kölbl, Tanja Lange, Martin M. Lauridsen, Florian Mendel,
+    Ruben Niederhagen, Christian Rechberger, Joost Rijneveld, Peter Schwabe, Jean-Philippe Aumasson,
+    Bas Westerbaan, and Ward Beullens. SPHINCS+ . Technical report, National Institute of Standards
+    and Technology, 2022. available at https://csrc.nist.gov/Projects/post-quantum-cryptography/
+    selected-algorithms-2022.
+11. Aviad Kipnis, Jacques Patarin, and Louis Goubin. Unbalanced Oil and Vinegar signature schemes. In
+    Jacques Stern, editor, EUROCRYPT’99, volume 1592 of LNCS, pages 206–222. Springer, Heidelberg,
+    May 1999.
+12. Aviad Kipnis and Adi Shamir. Cryptanalysis of the oil & vinegar signature scheme. In Hugo Krawczyk,
+    editor, Advances in Cryptology - CRYPTO ’98, 18th Annual International Cryptology Conference,
+    Santa Barbara, California, USA, August 23-27, 1998, Proceedings, volume 1462 of Lecture Notes in
+    Computer Science, pages 257–266. Springer, 1998.
+13. Thomas Prest, Pierre-Alain Fouque, Jeffrey Hoffstein, Paul Kirchner, Vadim Lyubashevsky, Thomas
+    Pornin, Thomas Ricosset, Gregor Seiler, William Whyte, and Zhenfei Zhang. FALCON. Technical
+    report, National Institute of Standards and Technology, 2022. available at https://csrc.nist.gov/
+    Projects/post-quantum-cryptography/selected-algorithms-2022.
+14. Pierre Pébereau. One vector to rule them all: Key recovery from one vector in uov schemes. Cryptology
+    ePrint Archive, Paper 2023/1131, 2023. https://eprint.iacr.org/2023/1131.
+15. Koichi Sakumoto, Taizo Shirai, and Harunaga Hiwatari. On provable security of UOV and HFE sig-
+    nature schemes against chosen-message attack. In Bo-Yin Yang, editor, Post-Quantum Cryptography
+    - 4th International Workshop, PQCrypto 2011, Taipei, Taiwan, November 29 - December 2, 2011.
+    Proceedings, volume 7071 of Lecture Notes in Computer Science, pages 68–82. Springer, 2011.
+16. Peter Schwabe, Roberto Avanzi, Joppe Bos, Léo Ducas, Eike Kiltz, Tancrède Lepoint, Vadim
+    Lyubashevsky, John M. Schanck, Gregor Seiler, Damien Stehlé, and Jintai Ding. CRYSTALS-
+    KYBER. Technical report, National Institute of Standards and Technology, 2022. available at
+    https://csrc.nist.gov/Projects/post-quantum-cryptography/selected-algorithms-2022.
+17. Jean-Pierre Serre. A Course in Arithmetic, volume 7 of Graduate Texts in Mathematics. Springer,
+    New York, NY, 1973.
+18. The Sage Developers. SageMath, the Sage Mathematics Software System (Version 9.5), 2022.
+    https://www.sagemath.org.
+
+
+
+
+                                                   10
+

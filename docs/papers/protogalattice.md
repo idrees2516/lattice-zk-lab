@@ -1,0 +1,350 @@
+# ProtogaLattice — Deep Analysis & Implementation Spec
+
+> Source paper: **“ProtogaLattice: Lattice-based Algebraic Folding”**, David Balbás (ETH Zürich),
+> Anca Nitulescu (Input Output, France), Maxime Plançon (Input Output, Switzerland).
+> This document is an implementation-grade transcription and analysis produced for the
+> lattice-ZK lab rebuild (`/home/z/my-project`). It is written to be sufficient on its own to
+> implement lab items **P0-4** (ring-Gröbner reduction module) and **P0-5** (PGL-Fold +
+> PGL-Boot end-to-end with relaxed-witness linearization), and to back P0-1..P0-3
+> (relations/setting + folding backbone).
+>
+> **Extraction caveat.** The source text layer (pdftotext of the PDF) mangles several math
+> glyphs: `→`, `←`, `∈`, `⊆`, `⊂`, `≤`, `≥`, `≈`, `≠`, `×`, `Σ`, `∏`, `∞`, brackets `[ ]` (render
+> as `r…s`), primes (`k'` renders as `k 1`), and the *slack-factor* glyph (rendered `%`).
+> This doc uses consistent readable symbols and flags every place where the mangled source
+> required interpretation. Sub/superscripts were reassembled by hand from the squeezed layout.
+
+---
+
+## 1 Metadata
+
+| Field | Value |
+|---|---|
+| Title | ProtogaLattice: Lattice-based Algebraic Folding |
+| Authors | David Balbás¹, Anca Nitulescu², Maxime Plançon³ |
+| Affiliations | ¹ ETH Zürich · ² Input Output (France) · ³ Input Output (Switzerland) |
+| Kind | Folding / accumulation scheme (reductions of knowledge), post-quantum (lattice) |
+| Setting | $R_q=\mathbb Z_q[X]/(X^N+1)$, power-of-two $N$; Ajtai (MSIS) commitments; $d$-degree polynomial maps $f:R_q^m\to R_q^n$ |
+| Core assumption | Module-SIS with $\ell_\infty$ norm, $\text{MSIS}^{κ,m,B}_{\infty,q}$ (128-bit via [ESS+19] estimates) |
+| Lineage | Protostar [BC23] / Protogalaxy [EG23] (algebraic folding over fields) ported to rings via **multivariate polynomial interpolation + Gröbner bases over $R_q[Y_1..Y_k]$** (Pauer); norm control via Cyclo-style folding range proofs (ternary sumcheck from (Super)Neo [NS26]) |
+| Two deliverables | (i) **PGL-Fold**: bounded-depth folding $\Xi^{acc}\times(\Xi^{fold})^k\to\Xi^{acc}$; (ii) **PGL-Boot**: witness bootstrapping $\Xi^{acc}_B\to\Xi^{acc}_{B'}$, $B'<B$, unlocking unbounded folding depth |
+| Headline numbers | Full iteration (incl. range proof), witness length $2^{30}$, folding depth $L=64$, $k=1$: **8.13 KB** proof (deg $f=2$), $\approx 4\times$ smaller than SOTA; $\gtrsim 30$ rounds vs $\sim 100$ (LatticeFold+); 6.52 KB at witness $2^{27}$, deg 2 |
+| vs. prior lattice folding | SuperNeo / LatticeFold+ / Cyclo are HyperNova-style sumcheck folding for CCS/LCCS with folding depths 8 / 8 / 64 (all bounded); ProtogaLattice folds *arbitrary polynomial relations natively* (incl. CCS, Plonkish, lookups via special-sound transcripts), depth 64 **with bootstrap** |
+| Open problems (paper) | (1) constant-round norm/range proof to fully realize the constant-round backbone (all known lattice range proofs are logarithmic-round: RoK&Roll, Paper SISsors, LatticeFold+, SALSAA, RoKoko); (2) zero-knowledge variant / “randomizing” property [KS24] |
+
+### 1.1 Abstract digest
+
+Folding schemes accumulate instances of an NP relation into a fixed-size accumulator, enabling
+IVC/PCD with low memory. All existing *lattice* folding schemes for high-degree relations
+(LatticeFold/LatticeFold+, Neo/SuperNeo, Cyclo) lean on the sumcheck protocol: fast prover, but
+huge verifier circuits because of many random-oracle (RO) invocations, which is poisonous in the
+IVC setting (every verifier operation is re-encoded inside the prover circuit each step).
+ProtogaLattice replaces the sumcheck backbone with **algebraic folding** (Protostar/Protogalaxy
+style): the fold is a closed algebraic transformation on the relation, verified with a constant
+number of rounds. Contribution (i): folding of multiple instances into bounded-norm accumulators
+for a bounded number of iterations ($L=64$). Contribution (ii): a bootstrapping reduction that
+re-anchors the witness norm, unlocking unlimited depth. Result: 8.13 KB full-iteration proofs at
+$2^{30}$ witnesses, fewer RO calls, smaller verifier circuits.
+
+### 1.2 Why the naive port of Protogalaxy to lattices fails (the paper’s motivation)
+
+Protogalaxy folds $k$ witnesses $w_1,\dots,w_k$ into an accumulator $w^*$ via univariate Lagrange
+polynomials $L_i(X)$ over a domain $H$, $W(X)=\sum_i L_i(X)w_i$, $w^*=W(\gamma)$. Soundness rests
+on Lemma 3 (linearity of $f$ modulo the vanishing polynomial $Z(X)=\prod_{a\in H}(X-a)$). Over
+lattices this breaks: evaluating Lagrange polynomials at a random $\gamma$ **inflates the norm of
+$w^*$** beyond $B$, and Ajtai commitments $t=Aw\bmod q$ are only binding for low-norm openings.
+Fix: combine witnesses with **multivariate** polynomials evaluated at *short* challenges, and
+replace the quotient-by-$Z(X)$ machinery with **ideals and Gröbner bases over the ring
+$M=R_q[Y_1,\dots,Y_k]$** — specifically the ideal generated by $Z_{i,j}(Y)=Y_iY_j-Y_i$, whose
+explicit reduced Gröbner basis (Proposition 1, per Pauer’s Gröbner theory over rings, App. D.1)
+makes reduction computable. The price: the fold only yields **relaxed (weak) openings**
+$(\Delta,x)$ with $\Delta\cdot t=Ax$, so a **folding range proof** on fresh witnesses and a
+**relaxed folding scheme** abstraction (Def. 8) are needed for tightness.
+
+### 1.3 Concrete proof sizes (paper Table 1)
+
+Folding depth $L=64$; $k$ fresh instances folded per iteration; relation defined by polynomial map
+$f$; proof only (commitments and instances excluded, in line with [NS26, GLLO26, Osa26]).
+
+| Witness size | deg $f=2$, $k{=}1$ | deg 2, $k{=}2$ | deg 2, $k{=}3$ | deg $f=5$, $k{=}1$ | deg 5, $k{=}2$ | deg 5, $k{=}3$ |
+|---|---|---|---|---|---|---|
+| 0.1 GiB ($\approx 2^{30}$) | 8.13 KB | 14.44 KB | 25.36 KB | 8.88 KB | 27.09 KB | 110.86 KB |
+| 1.0 GiB ($\approx 2^{33}$) | 9.03 KB | 17.05 KB | 29.03 KB | 9.78 KB | 30.55 KB | 118.07 KB |
+
+### 1.4 Comparison with prior lattice folding (paper Table 2)
+
+Degree-2 relations (R1CS), total integer witness length $2^{27}$, folding $k=1$ per step:
+
+| | SuperNeo [NS26] | LatticeFold+ [BC25b] | Cyclo [GLLO26] | **ProtogaLattice** |
+|---|---|---|---|---|
+| Folded relation | CCS/LCCS | CCS/LCCS | CCS/LCCS | **Polynomial relations (incl. CCS)** |
+| Technique | HyperNova-style sumcheck | sumcheck | sumcheck | **multivariate polynomial interpolation** |
+| Range proof | binary sumcheck | wider proof, ring-monomial check | ternary sumcheck | ternary sumcheck (pluggable module) |
+| Folding depth | 8 | 8 | 64 | 64 **+ bootstrap (unbounded)** |
+| Proof size | $\sim$100 KB | $\sim$100 KB | 31.4 KB | **6.52 KB** |
+| # Rounds | $>60$ | $\sim$100 | $>60$ | $\sim$30 |
+
+*(The depth annotations of Table 2 are partially mangled in the text layer; the reading above is
+consistent with the paper’s own narrative — SuperNeo/LatticeFold+ bounded at 8, Cyclo bounded at
+64, ProtogaLattice 64 with bootstrapping. ProtogaLattice supports $k>1$ but efficiency degrades
+significantly for large $k$, see §7.)*
+
+### 1.5 Related-work anchors used in this doc
+
+- **Nova** [KST22] (folding, relaxed R1CS), **Protostar** [BC23] (high-degree algebraic folding,
+  special-sound transcript folding), **Protogalaxy** [EG23] (Lagrange folding + Lemma 3),
+  **Hypernova** [KS24], **FLI** [GM24] (sumcheck folding families).
+- **LatticeFold/LatticeFold+** [BC25a, BC25b], **Neo/SuperNeo** [NS26], **Cyclo** [GLLO26]
+  (sumcheck-based lattice folding; SuperNeo/Cyclo supply the ternary range proof adapted here).
+- **Lova** [FKNP24] — the only prior *algebraic* lattice folding (subset-sum over $\mathbb Z$).
+- **PikkuFold** [Osa26] (concurrent; challenge rejection sampling reusable here; its range-proof
+  module needs $O(\lambda\log m/2)$-bit projection matrices — tens of MB, verifier-unfriendly).
+- Range-proof landscape: **RoK and Roll** [KLNO25], **Paper SISsors** [KLNO24], **SALSAA**
+  [KLOT25], **RoKoko** [KLN+26] — all logarithmic-round (see open problem 1).
+- Reduction-of-knowledge framework: **KP23**; relaxed binding: [ACK21, ALS20]; Ajtai [Ajt96];
+  MSIS: [LS15, PR06, LM06, ACK21]; estimates [ESS+19]; sampling sets [CCKP19];
+  generalized Schwartz–Zippel [BCPS18]; Lyubashevsky–Seiler invertibility (power-of-two case).
+
+### 1.6 Lab implementation-plan mapping (this repo)
+
+| Lab item | Paper material | Doc sections |
+|---|---|---|
+| P0-1 relations/setting | Def. 5, 6, 7 (relations $\Xi$, $\Xi^{acc}$, relaxed $\Xi^{fold}/\Xi^{acc}$ with $x^{RP}$), §4.1 | §4 |
+| P0-2 setting | §2.3–2.7 (rings, NTT, sampling sets, MSIS, Ajtai, relaxed binding) | §3 |
+| P0-3 folding backbone | Figure 1 architecture (relaxed folding + folding range proof modules), Def. 8, Fig. 4 (Protogalaxy-style fold $\Xi_{rand}\times\Xi^k\to\Xi_{rand}$), Fig. 2 PGL-Fold, Fig. 3 PGL-Boot | §4, §5 |
+| P0-4 ring-Gröbner module | §5.1 + Prop. 1 + App. D.1: ideal $I=\langle Y_iY_j-Y_i\rangle\subset M=R_q[Y]$, explicit reduced Gröbner basis, Euclidean division / normal-form reduction modulo $I$ | §3.9, §5.1, §6.2, §8 |
+| P0-5 PGL-Fold/PGL-Boot end-to-end | Figs. 2, 3 with relaxed-witness linearization and $e^*$-style error bookkeeping; norm bookkeeping ($B_{ext}$, slack $\zeta$) | §5, §6, §7, §8 |
+
+---
+
+## 2 Notation Table
+
+General:
+
+| Symbol | Meaning |
+|---|---|
+| $\lambda$ | security parameter |
+| $\mathbb N$ | naturals $\ge 0$; $\textsf{negl}$ negligible; $\textsf{poly}$ polynomial; PPT probabilistic poly-time |
+| $x\leftarrow\$ S$ | uniform sample from finite set $S$; $y\leftarrow \mathcal A(x)$ algorithm output |
+| $[n,m]$, $[n]$ | $\{n,\dots,m\}$, $\{1,\dots,n\}$ |
+| $\mathbf x$, $\mathbf M$ | vectors / matrices (bold); $x_i$ i-th component; $M_{i,j}$ $(i,j)$ entry |
+| $\mathbf 0_k$, $\mathbf 1_k$, $\mathbf 0_{k\times k}$, $I_{k\times k}$ | zero/one vectors, zero/identity matrices |
+| $x\Vert y$ | concatenation |
+| $\Xi$ | efficiently decidable binary relation; $(x;w)\in\Xi$: statement $x$, witness $w$; sometimes $x$ folded into $w$ |
+| $\|\cdot\|$ | $\ell_\infty$ norm (default); $\|\cdot\|_2$ used only in Lemma 2 |
+| $\text{poly}_i(\beta)$ | power-monomial compressor: $\beta\in F^t$ ($t=\lceil\log n\rceil$), $\text{poly}_i(\beta)=\prod_{j=1}^{t}(1,\beta_j)$ where the pair $(1,\beta_j)$ selects $1$ or $\beta_j$ by the $j$-th bit of $i\in[n]$ (Protogalaxy) |
+
+Rings:
+
+| Symbol | Meaning |
+|---|---|
+| $N$ | ring dimension, power of two |
+| $R$ | $\mathbb Z[X]/(X^N+1)$ (power-of-two cyclotomic) |
+| $q>2$ | prime modulus; $\mathbb Z_q=\{-\lfloor q/2\rfloor,\dots,\lfloor q/2\rfloor\}$ (centered) |
+| $R_q$ | $R/qR=\mathbb Z_q[X]/(X^N+1)$ |
+| $d_1$ | NTT splitting factor, $d_1\mid N$ power of two; $q\equiv 1+2d_1 \pmod{4d_1}$ $\Rightarrow$ $R_q\simeq F_{q^{N/d_1}}$ via NTT |
+| $\text{coef}(f)$ | coefficient vector $(f_0,\dots,f_{N-1})\in\mathbb Z_q^N$ of $f\in R_q$ |
+| $\text{ct}(f)$ | constant term $f_0$; for $\mathbf f\in R_q^n$: $\text{coef}(\mathbf f)\in\mathbb Z_q^{n\times N}$ (stacked transposed coefficient rows), $\text{ct}(\mathbf f)\in\mathbb Z_q^n$ |
+| $M$ | $R_q[Y_1,\dots,Y_k]$, multivariate polynomial ring over $R_q$ (Gröbner arena) |
+| $I$, $Z_{i,j}(Y)$ | ideal $I\subset M$ generated by $Z_{i,j}(Y)=Y_iY_j-Y_i$ (and conventions for its Gröbner basis — §5.1) |
+| $C$, $C_{\text{small}}$ | (strong) sampling set $\subseteq R_q$; small challenge set with expansion factor $T$ |
+| $T=\|C_{\text{small}}\|_{\text{op}}$ | expansion factor: $\sup_{c\in C_{\text{small}},\hat v\in R}\|c\cdot\hat v\|_\infty/\|\hat v\|_\infty$ (Eq. 1) |
+
+Commitments / assumptions:
+
+| Symbol | Meaning |
+|---|---|
+| $\text{MSIS}^{κ,m,B}_{\infty,q}$ | find $\mathbf x\in R_q^m$, $\|\mathbf x\|_\infty\le B$, $\mathbf A\mathbf x=\mathbf 0$ over $R_q$, for $\mathbf A\leftarrow\$ R_q^{κ\times m}$ |
+| $\mathbf A\in R_q^{κ\times m}$ | Ajtai commitment key ($\text{KeyGen}$) |
+| $\text{Com}_{\mathbf A}(\mathbf x)=\mathbf A\mathbf x\bmod q$ | Ajtai commitment (deterministic, additively homomorphic), $\mathbf x\in R^m$, $\|\mathbf x\|_\infty\le B$ |
+| $t$ | a commitment value $=\mathbf A\mathbf w\bmod q\in R_q^\kappa$ (careful: $t$ also names instances) |
+| $B$ | norm bound for (tight) witnesses $\mathbf w$ |
+| $(\Delta,\mathbf x)$ | $B$-**weak opening** of a commitment $t$: $\Delta\in(C-C)$, $\mathbf x\in R^m$, $\Delta\cdot t=\mathbf A\mathbf x\bmod q$, $\|\mathbf x\|_\infty\le B$ |
+| $B$-relaxed binding | infeasible to find two distinct $B$-weak openings; holds if $\text{MSIS}^{κ,m,4TB}_{\infty,q}$ hard |
+| $\mathbf s$ | small ring factor of a weak opening: extracted witness satisfies $\mathbf A\mathbf w=t$ with $\|\mathbf s\mathbf w\|\le B$ (relaxed norm) |
+| $\zeta$ | **slack factor**: bound $\|\mathbf s\|_{\text{op}}\le\zeta$, $\zeta\ge 1$ (glyph mangled in PDF; called “slack factor” in proofs; e.g. $\zeta=(2T)^{k'-1}$) |
+
+Relations / protocols:
+
+| Symbol | Meaning |
+|---|---|
+| $f=(f_1,\dots,f_n)$ | polynomial map $f:R_q^m\to R_q^n$ of degree $d$, $f(\mathbf 0)=\mathbf 0$; defines the constraint system |
+| $\Xi_{f,n,B}$ | base (fresh-witness) relation, Eq. of Def. 5 (§4.1) |
+| $\Xi^{acc}_{f,n,B}$ | accumulator relation with randomizer $\beta$ and error $\mathbf e$ (Def. 5) |
+| $\Xi^{fold}_{f,n,B,\zeta}$, $\Xi^{acc}_{f,n,B,\zeta}$ | relaxed relations (with range-proof data $x^{RP}$ and weak-opening witness $(\mathbf w,\mathbf s)$, Def. 6) |
+| $\Xi_{rand}$ | Protogalaxy randomized relation over fields (Def. 4) — template for $\Xi^{acc}$ |
+| $f^{RP}:R_q^{m^{RP}}\to R_q^{n^{RP}}$ | range-proof polynomial map appended by the folding range proof (Def. 6/7) |
+| $x^{RP}$ | extra instance data attached by the range proof ($\in R_q^{\kappa^{RP}}$ … exact shape §4) |
+| $\beta\in R_q^t$ | accumulator randomizer seed, $t=\lceil\log n\rceil$ |
+| $\mathbf e\in R_q$ | accumulator error term ($\sum_i\text{poly}_i(\beta)f_i(\mathbf w)=e$) |
+| $W(X)$, $L_i(X)$, $Z(X)$ | Protogalaxy interpolation polynomial, Lagrange basis over $H$ ($|H|=k{+}1$), vanishing polynomial |
+| $\gamma$ | verifier folding challenge |
+| $k$ | number of fresh witnesses folded per iteration |
+| $k'$ | (security analysis) number of extracted/forked openings — see §6 (rendered `k 1` in source) |
+| $L$ | folding depth (number of iterations before bootstrap); paper uses $L=64$ |
+| $B_{ext}$ | extracted-witness norm bound after folding (e.g. $B_{ext}=(2T)^{\,\cdot}\cdot\gamma$-ish — exact forms in §6/§7) |
+| $\text{poly}$ vs $\textsf{poly}$ | beware: power monomials $\text{poly}_i(\beta)$ (Protogalaxy) vs polynomial-time $\textsf{poly}(\lambda)$ |
+| $\Omega$, $\omega$ | challenge domains / roots used in PGL-Boot (§5, Fig. 3) |
+| $\Xi^{B}_{acc}\to\Xi^{acc}_{B'}$ | bootstrapping reduction: output norm bound $B'<B$ |
+
+Framework (Def. 1, reductions of knowledge): $(G,P,V)$; $G(1^\lambda,1^\ell)\to\rho$ public
+parameters; $P(t_1,w_1)\to(t_2,w_2)$; $V(\rho,t_1)\to t_2$; completeness: same $t_2$,
+$(t_2,w_2)\in\Xi_2$; knowledge soundness: rewinding extractor $\mathcal E$ with
+$\Pr[(t_1,w_1)\in\Xi_1']\ge\epsilon(\mathcal A)-\textsf{negl}(\lambda)$ whenever adversary wins
+with $\ge 1/\textsf{poly}(\lambda)$; public coin. Folding relations $(\Xi_1,\Xi_2)$ vs extraction
+relations $(\Xi_1',\Xi_2')$ with $\Xi_i\subseteq\Xi_i'$ — completeness over the tight relations,
+extraction over the relaxed ones (the lattice-necessary decoupling).
+
+---
+
+## 3 Algebraic Setting
+
+### 3.1 Cyclotomic rings and NTT
+
+$R=\mathbb Z[X]/(X^N+1)$ with $N$ a power of two; $q>2$ prime;
+$R_q=R/qR=\mathbb Z_q[X]/(X^N+1)$ with $\mathbb Z_q$ **centered** (symmetric representatives
+$\{-\lfloor q/2\rfloor,\dots,\lfloor q/2\rfloor\}$ — implementation must keep coefficients
+centered for all norm bookkeeping). If $q\equiv 1+2d_1\pmod{4d_1}$ with $d_1\mid N$ (both powers
+of two), then $R_q\simeq F_{q^{N/d_1}}$ via NTT.
+
+**Lemma 2 (Lyubashevsky–Seiler, power-of-two case).** With $N,d_1$ powers of two,
+$1<d_1\le N$, $q=1+2d_1\bmod 4d_1$ prime:
+
+$$X^N+1=\prod_{i=1}^{d_1}\left(X^{N/d_1}-r_i\right)\pmod q,$$
+
+for distinct $r_i\in F_q^\times$, each factor irreducible mod $q$; and any nonzero
+$y(X)=\sum_{i=0}^{N-1}y_iX^i\in R$ is invertible in $R_q$ if
+$\|y\|_\infty<q^{1/(2d_1)}$ — note the source line reads
+$\|y\|_\infty<q^{\frac12\cdot 1/d_1}$ — or $\|y\|_2<q^{1/d_1}$
+(where $\|y\|_2^2=\sum_i y_i^2$).
+
+**Implementation note (lzk reuse).** This is the standard negacyclic NTT with $\text{ntt}$
+butterflies; $2d_1$-th root of unity $\omega\in\mathbb Z_q$ with $\omega^{N/d_1}=r_i$ family.
+The lab core `lzk` already implements $\mathbb Z_q[x]/(x^n+1)$ NTT; ProtogaLattice only needs
+$q\equiv 1\bmod 2N$-style compatibility plus the centered-representation discipline.
+
+### 3.2 Coefficient and constant-term embeddings
+
+For $f=\sum_{i\in[N]}f_iX^i\in R_q$: $\text{coef}(f)=(f_0,\dots,f_{N-1})\in\mathbb Z_q^N$,
+$\text{ct}(f)=f_0$. For $\mathbf f=(f_0,\dots,f_{n-1})\in R_q^n$:
+$\text{coef}(\mathbf f)=(\text{coef}(f_0)^{T},\dots,\text{coef}(f_{n-1})^{T})\in\mathbb Z_q^{n\times N}$
+(row $i$ = coefficients of the $i$-th ring element) and $\text{ct}(\mathbf f)\in\mathbb Z_q^n$
+(the first column of $\text{coef}(\mathbf f)$, i.e. all constant terms). These embeddings are
+used by the Gröbner-reduction module (P0-4) and by the constant-term extraction trick in the
+folding backbone — treat `coef` as the canonical dense layout $\mathbb Z_q^{n\cdot N}$ with
+ring-major ordering.
+
+### 3.3 Sampling sets and expansion factor
+
+**Definition 2 (sampling sets, [CCKP19]).** $C\subseteq R$ (for an arbitrary ring $R$) is a
+*sampling set* if the difference of any two distinct elements of $C$ is not a zero divisor; it is
+*strong* if the difference is invertible. Example: $\mathbb Z_q\subseteq R_q$ is a strong
+sampling set for prime $q$ (differences of distinct integers are units in $R_q$ — used for
+Schwartz–Zippel over $R_q$).
+
+**Expansion factor.** To keep homomorphic commitments binding under multiplication by challenge
+ring elements, choose a strong sampling set $C_{\text{small}}\subseteq R_q$ with
+
+$$\|C_{\text{small}}\|_{\text{op}}:=\sup_{c\in C_{\text{small}},\ \hat v\in R}
+\frac{\|c\cdot\hat v\|_\infty}{\|\hat v\|_\infty}\qquad(1)$$
+
+small; denote $T:=\|C_{\text{small}}\|_{\text{op}}$. Here $\hat v$ ranges over $R$ (the integer
+lift, *not* mod $q$) — the factor measures worst-case coefficient growth of exact integer
+convolution $c\cdot\hat v$ relative to $\|\hat v\|_\infty$. For ternary $c\in\{-1,0,1\}+X\cdot\{0,1\}$-style
+challenge sets (the (Super)Neo family), $T=O(\sqrt N)$; every norm bound in the paper is
+polynomial in $T$, so the concrete choice of $C_{\text{small}}$ directly sets $\zeta$, $B_{ext}$,
+and hence MSIS parameters (§7).
+
+### 3.4 Ring lemmas
+
+**Lemma 1 (Generalized Schwartz–Zippel, [BCPS18]).** Nonzero $f\in R_{\le d}[X_1,\dots,X_k]$
+(per-variable degree $\le d$) over ring $R$, $C\subseteq R$ a sampling set:
+$\Pr_{r\leftarrow\$ C^k}[f(r)=0]\le |C|^{-1}d^k$ — wait, source: $\Pr\le d^k/|C|$ (degree-$d$
+per variable, $k$ variables; the bound is $d^k/|C|$ for a sampling set of size $|C|$ sampled
+per-coordinate, as in [BCPS18]). Used for: challenge-space soundness of the multivariate
+interpolation checks, and Forking/RO arguments. The strong version (invertible differences) gives
+the standard division-event bounds.
+
+**Lemma 2.** See §3.1 (factorization + norm invertibility thresholds).
+
+### 3.5 Module-SIS
+
+**Definition 3 ($\text{MSIS}^{κ,m,B}_{\infty,q}$, [ACK21]).** Input $\mathbf A\leftarrow\$
+R_q^{κ\times m}$; find nonzero $\mathbf x\in R_q^m$ with $\|\mathbf x\|_\infty\le B$ and
+$\mathbf A\mathbf x=\mathbf 0$ over $R_q$. Parameters chosen for 128-bit security per [ESS+19]
+(the lattice-estimator discipline used across the lab).
+
+### 3.6 Ajtai commitments and relaxed binding
+
+$\text{CM}_{κ,m,B}$: $\text{KeyGen}_{\text{Comp}}(κ,m)\to\mathbf A\leftarrow\$ R_q^{κ\times m}$;
+$\text{Com}_{\mathbf A}(\mathbf x)=\mathbf A\mathbf x\bmod q\in R_q^κ$ for $\mathbf x\in R^m$,
+$\|\mathbf x\|_\infty\le B$ — deterministic, additively homomorphic.
+
+- **Binding (tight):** two openings $\mathbf x_1\neq\mathbf x_2$ of the same $t$ with
+  $\|\mathbf x_i\|_\infty\le B$ give an $\text{MSIS}^{κ,m,2B}_{\infty,q}$ solution
+  ($\mathbf x_1-\mathbf x_2$, norm $\le 2B$).
+- **Relaxed binding (what folding actually needs).** Let $C\subset R_q$ strong sampling set with
+  expansion factor $T$. $(\Delta,\mathbf x)\in(C-C)\times R^m$ is a $B$-**weak opening** of $t$
+  if $\Delta\cdot t=\mathbf A\mathbf x\bmod q$ and $\|\mathbf x\|_\infty\le B$. The commitment is
+  $B$-**relaxed binding** if it is infeasible to produce two different $B$-weak openings
+  $(\Delta_1,\mathbf x_1),(\Delta_2,\mathbf x_2)$ of one commitment with
+  $\Delta_1\mathbf x_2\neq\Delta_2\mathbf x_1$. Ajtai satisfies this if
+  $\text{MSIS}^{κ,m,4TB}_{\infty,q}$ is hard (the two weak openings combine into an MSIS
+  solution of norm $\le 4TB$ after clearing $\Delta$’s via the expansion factor).
+- **Extractor consequence (used pervasively):** from a weak opening, one recovers a witness
+  $\mathbf w$ with $\mathbf A\mathbf w=t$ but $\|\mathbf w\|$ possibly huge; the *controllable*
+  statement is $\|\mathbf s\mathbf w\|\le B$ for the multiplier $\mathbf s$ (a column of small
+  ring elements) with $\|\mathbf s\|_{\text{op}}\le\zeta$. Tightness is then restored by the
+  folding range proof (Def. 7): from relaxed $(\mathbf w,\mathbf s)$ with $\|\mathbf s\|_{\text{op}}\le\zeta$
+  it extracts the original $\mathbf w$ with the tight $\|\mathbf w\|\le B$.
+
+### 3.7 Reductions of knowledge and folding schemes
+
+**Definition 1 (RoK, [KP23] as adapted).** See the framework box at the end of §2. Key structural
+points for implementers: (i) completeness is w.r.t. the *folding* relations $\Xi_1,\Xi_2$;
+knowledge-soundness is w.r.t. *extraction* relations $\Xi_1',\Xi_2'$ with $\Xi_i\subseteq\Xi_i'$
+— the lattice setting forces this decoupling because extraction yields weak openings; (ii) the
+extractor has **rewinding** access to the adversary and runs in expected poly time; (iii) all
+verifier messages are bounded-length random strings (public coin) — Fiat–Shamir applies with a
+single domain-separated RO transcript hash per round.
+
+A **folding scheme for $k$ witnesses** is an RoK
+$\Xi^{acc}\times\Xi^k\to\Xi^{acc}$ (product relation in, accumulator out). **Relaxed folding
+scheme** (Def. 8, §4) is the version where the extractor only recovers relaxed openings and a
+companion folding range proof repairs tightness.
+
+### 3.8 Warm-up: Protogalaxy over fields (Section 3 of the paper)
+
+Base relation $\Xi=\{(t,w): t=\text{Com}(w)\wedge f(w)=\mathbf 0_n\}$ (Eq. 2) for polynomial map
+$f=(f_1,\dots,f_n):F^m\to F^n$ of degree $d$ over field $F$. Given accumulator $w_0$ and fresh
+$w_1,\dots,w_k$, define $W(X)=L_0(X)w_0+\sum_{i\in[k]}L_i(X)w_i$ with $\{L_i\}$ the Lagrange
+basis over a domain $H$, $|H|=k+1$; the new accumulator is $w^*=W(\gamma)$ for verifier
+challenge $\gamma\in F$.
+
+**Lemma 3 (linearity modulo the vanishing polynomial, [EG23, Lem. 4.2] for arbitrary domains).**
+For a polynomial map $f:F^m\to F$ and vectors $w_1,\dots,w_k\in F^m$:
+
+$$f\Big(\sum_{i=1}^k L_i(X)w_i\Big)=\sum_{i=1}^k L_i(X)f(w_i)\ \bmod Z(X),
+\qquad Z(X)=\prod_{a\in H}(X-a),$$
+
+*Proof idea:* $H(X):=f(\sum_iL_i(X)w_i)-\sum_iL_i(X)f(w_i)$ vanishes at every $a_j\in H$ (since
+$L_i(a_j)=\delta_{ij}$ and $f(L_j(a_j)w_j)=L_j(a_j)f(w_j)$ by linearity of evaluation), so
+$Z\mid H$. Consequently the prover sends a **quotient** of $f(W(X))$ by $Z(X)$ and the verifier
+checks a single linear identity at $\gamma$ — this is the whole reason Protogalaxy is
+round-efficient (1 challenge round), and the whole reason it fails over $R_q$: Lagrange
+coefficients at random $\gamma\in R_q$ have unbounded norm, so $w^*=W(\gamma)$ leaves the
+binding regime of Ajtai commitments.
+
+**Definition 4 (structured randomized relation $\Xi_{rand}$, i.e. the Protogalaxy accumulator).**
+
+$$\Xi_{rand}:=\Big\{\big((t,\beta,e),\,w\big)\ :\ t=\text{Com}(w)\ \wedge\
+\sum_{i=1}^n\text{poly}_i(\beta)\,f_i(w)=e\Big\},$$
+
+with seed $\beta\in F^t$, $t=\lceil\log n\rceil$. The $\text{poly}_i(\beta)$ power-monomial
+ladder compresses the $n$ rows of $f$ into one field element $e$ using only $\log n$ challenges,
+keeping the *verifier* sublinear while still allowing re-randomization of $\beta$ at each fold.
+ProtogaLattice keeps exactly this randomization structure, but over ring elements
+($\beta\in R_q^t$, $e\in R_q$).
+
+*(§3 continues in §3.9 with the Gröbner-basis machinery over $M=R_q[Y_1,\dots,Y_k]$ —
+completed below after the Section 5 reading pass.)*

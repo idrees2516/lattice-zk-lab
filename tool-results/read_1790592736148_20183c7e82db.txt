@@ -1,0 +1,282 @@
+     1→ Akita: A High-Performance Lattice-Based
+     2→ Polynomial Commitment Scheme
+     3→
+     4→Quang Dao1,3 , Omid Bodaghi1 , Amirhossein Khajehpour1 , Giuseppe Vitto1 , Mohammadtaghi
+     5→ Badakhshan1 , Markos Georghiades2 , Fengrun Liu3 , Jiapeng Zhang4 , and Justin Thaler2,5
+     6→ 1
+     7→ LayerZero Labs
+     8→ 2
+     9→ a16z crypto research
+    10→ 3
+    11→ Carnegie Mellon University
+    12→ 4
+    13→ University of Southern California
+    14→ 5
+    15→ Georgetown University
+    16→
+    17→
+    18→
+    19→ Abstract. Lattice-based polynomial commitment schemes (PCSs) promise post-quantum
+    20→ SNARKs with two properties that elliptic curves provide and hash-based schemes, today’s
+    21→ deployed post-quantum default, do not: concretely small proofs and commitment time propor-
+    22→ tional to the number of nonzero entries in the committed polynomial rather than its length.
+    23→ The second property is essential to Twist and Shout (CRYPTO 2026), the fastest known
+    24→ memory-checking arguments and a core component of the Jolt zero-knowledge virtual machine
+    25→ (zkVM): their prover commits to enormous polynomials that are almost entirely zero. Yet
+    26→ despite a wave of recent work, existing lattice-based PCSs achieve at most two of the three
+    27→ properties that deployment demands: small proof size, fast verification, and soundness from
+    28→ standard assumptions such as Module-SIS.
+    29→ We present Akita, a lattice-based PCS that achieves all three. We improve on the square-
+    30→ root-time verifier of Hachi (ePrint 2026), our direct predecessor, through a new setup offloading
+    31→ technique: the public setup matrices are committed ahead of time, and the verifier’s work in
+    32→ processing them is deferred and proved against these commitments. For any fixed K ≥ 2, this
+    33→ reduces verification time to O eK,λ (N 1/K ) while preserving OeK,λ (log N ) proof size, O
+    34→ eK,λ (N )
+    35→ prover time, and security from standard Module-SIS. We also optimize every fold from root to
+    36→ tail and iterate the fold to completion. This includes an optimized digit range check, relation-
+    37→ specific ring dimensions and subring challenges, complementary methods for embedding field
+    38→ evaluations and checking ring relations, commitments compressed to 128 bytes each, and exact
+    39→ Euclidean norm checks for tighter Module-SIS parameters.
+    40→ Beyond the core protocol, Akita provides the capabilities needed for deployment in a zkVM:
+    41→ batched openings of separately committed polynomials, low-communication distributed proving,
+    42→ and an offline planner for selecting secure parameters under configurable cost objectives. We
+    43→ implement Akita in Rust and benchmark it against existing lattice-based and hash-based PCSs.
+    44→ Across these benchmarks, Akita produces proofs of only 61–72 KB, matching Greyhound’s when
+    45→ both schemes are calibrated to the same lattice-security target, while verifying 19.2× to 89.7×
+    46→ faster. Akita’s prover uses the least memory: beyond storing the polynomial itself, its memory
+    47→ overhead grows sublinearly in the polynomial size. We also integrate Akita into Jolt. For every
+    48→ program size we evaluate, Jolt-with-Akita achieves a 1.3× to 2.2× prover speedup and 2.2× to
+    49→ 7.4× verifier speedup over Jolt-with-Dory, while producing comparable proof sizes, with every
+    50→ proof below 100 KB.
+    51→ Table of Contents
+    52→
+    53→
+    54→Akita: A High-Performance Lattice-Based Polynomial Commitment Scheme . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+    55→ Quang Dao, Omid Bodaghi, Amirhossein Khajehpour, Giuseppe Vitto, Mohammadtaghi Badakhshan,
+    56→ Markos Georghiades, Fengrun Liu, Jiapeng Zhang, and Justin Thaler
+    57→1 Introduction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+    58→ 1.1 Our Contributions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+    59→ 1.2 Related Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+    60→ 1.3 Organization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+    61→2 Technical Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+    62→ 2.1 Warm-Up: The Hachi Fold . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+    63→ 2.2 Setup Offloading and the Constant-Root Verifier . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+    64→ 2.3 Optimized Digit Range Check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+    65→ 2.4 Optimizing the Full Recursion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+    66→ 2.5 Two Opening Representations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+    67→ 2.6 Checking Ring Relations with or without Quotients . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+    68→ 2.7 Commitment Compression . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+    69→ 2.8 Bounding Response Coefficients and the Total Squared Norm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+    70→ 2.9 Batching and Distributed Proving . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+    71→ 2.10 Offline Parameter Selection and Independent Validation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+    72→3 Preliminaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+    73→ 3.1 Cyclotomic Rings, Extension Fields, and Challenge Subrings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+    74→ 3.2 Sparse and Filtered Folding Challenges . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+    75→ 3.3 Gadget Decomposition and Module-SIS . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31
+    76→ 3.4 Multilinear Extensions and Sum-Check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+    77→ 3.5 Equality-Factored Sum-Check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+    78→ 3.6 Quotient-Lift Ring Switching . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+    79→ 3.7 Tensor Reduction to the Extension Field . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36
+    80→ 3.8 Coordinate-Wise Special Soundness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38
+    81→4 Setup and Commitments . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+    82→ 4.1 Setting . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+    83→ 4.2 Schedule Topology and Fold Configuration . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44
+    84→ 4.3 Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 45
+    85→ 4.4 Per-Matrix Ring Dimensions and Challenge Families . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+    86→ 4.5 Commitment . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 50
+    87→ 4.6 Commitments Formed before the Fold . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 55
+    88→5 One Fold for an Opening Batch . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 56
+    89→ 5.1 Inputs and Parameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 56
+    90→ 5.2 Forming the Partial Opening Evaluations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 58
+    91→ 5.3 Binding the Partials and Folding the Sources . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 60
+    92→ 5.4 The Witness Passed to the Next Level . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 62
+    93→ 5.5 Interaction and Special Cases . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 64
+    94→6 Norm Checks for the Recursive Witness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 66
+    95→ 6.1 Digit Range Check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 66
+    96→ 6.2 Certifying the ℓ2 Response Norm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 68
+    97→7 Checking the Ring Relations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 71
+    98→ 7.1 Opening-Method Evaluation Rows . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 71
+    99→ 7.2 The Common Ring Relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73
+   100→ 7.3 Reducing Ring Equations to Field Identities . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73
+   101→ 7.4 The Fused Sum-Check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 78
+   102→ 7.5 Verifier Evaluation of the Batched Row . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 79
+   103→8 Recursive Opening and Terminal Handling . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 81
+   104→ 8.1 Composing the Folds . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 81
+   105→ 8.2 Terminal Levels (Tail Handling) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 81
+   106→9 Verifier Offloading . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 82
+   107→ 9.1 The Setup Claim and Setup-Product Sum-Check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 83
+   108→ Akita: Lattice-Based PCS 3
+   109→
+   110→ 9.2 Passing the Setup Opening to the Next Fold . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 83
+   111→ 9.3 Full Schedules and Admissibility . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 85
+   112→ 9.4 The Constant-Root Verifier . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 86
+   113→ 9.5 The Assembled Protocol . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 90
+   114→10 Security of Akita . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 90
+   115→ 10.1 Completeness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 93
+   116→ 10.2 Knowledge Soundness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 97
+   117→ 10.3 Schedules Chosen from a Public Family . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 115
+   118→11 Response Chunking for Distributed Proving . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 116
+   119→ 11.1 The Distributed-Response Obstruction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 117
+   120→ 11.2 The Response-Chunked Witness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 117
+   121→ 11.3 One Relation over Chunked Witness Columns . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 118
+   122→ 11.4 Local Images and the Recursive Commitment . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 119
+   123→ 11.5 Distributed Sum-Check and Verifier Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 120
+   124→ 11.6 Cost, Completeness, and Security . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 121
+   125→12 Offline Planner and Parameter Selection . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 123
+   126→ 12.1 Parameter-Selection Approaches . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 123
+   127→ 12.2 Choosing a Complete Schedule . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 123
+   128→ 12.3 Predicting the Next Fold . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 124
+   129→ 12.4 Searching Across the Recursion . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 125
+   130→ 12.5 Validating and Using Schedules . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 125
+   131→13 Implementation and Evaluation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 125
+   132→ 13.1 Implementation and Experimental Methodology . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 125
+   133→ 13.2 Comparison with Lattice-Based PCSs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 126
+   134→ 13.3 Comparison with Hash-Based PCSs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 128
+   135→ 13.4 Jolt End-to-End . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 130
+   136→14 Conclusion and Future Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 132
+   137→A Multilinear Evaluation from Structured Factors . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 136
+   138→ A.1 From Tensor Factors to Vector Addresses . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 137
+   139→ A.2 The Common Evaluation Problem . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 138
+   140→ A.3 Finite-State Contraction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 139
+   141→ A.4 Affine Addresses on Intervals . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 140
+   142→ A.5 Sharing Equality Work and Combining Families . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 142
+   143→B Evaluating Akita’s Public Weights . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 143
+   144→ B.1 Quotient-Free Relation Weights . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 143
+   145→ B.2 Opening, Range, and Norm Weights . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 145
+   146→ B.3 Factored Blocks in the Relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 147
+   147→ B.4 Shared Setup Views and Offloaded Weights . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 148
+   148→C SIS Security Estimation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 149
+   149→D Certifying Operator-Norm Challenge Filters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 153
+   150→ D.1 A Deterministic Fixed-Point Predicate . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 154
+   151→ D.2 An Exact Accepted-Support Certificate . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 155
+   152→ D.3 Concrete Certificates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 156
+   153→E Akita in Jolt . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 156
+   154→ E.1 Committed Polynomials . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 156
+   155→ E.2 From Column Claims to Commitment Openings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 157
+   156→ E.3 One Heterogeneous Akita Proof . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 158
+   157→ E.4 Schedules and Setup Offloading . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 158
+   158→ E.5 Transcript Grinding in the Backend . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 158
+   159→F Corrections and Security Mismatches in Prior Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 159
+   160→ F.1 Corrections to Protocol Descriptions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 159
+   161→ F.2 Released Implementations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 160
+   162→G Response Bounds and Parameter Estimates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 163
+   163→ G.1 Bounds for Honest Responses . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 164
+   164→ G.2 From Response Bounds to Completeness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 166
+   165→ G.3 A Response Model for Parameter Selection . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 168
+   166→ G.4 A Certified Alternative for Digit Energies . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 172
+   167→H PCS Benchmark Scope and Parameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 173
+   168→I Benchmark Methodology and Detailed Measurements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 174
+   169→4 Dao, Bodaghi, Khajehpour, Vitto et al.
+   170→
+   171→ I.1 Software and Measurement Procedure . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 175
+   172→ I.2 Inputs and Communication Accounting . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 176
+   173→ I.3 Jolt Measurement Artifact . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 176
+   174→ I.4 Detailed Hash-Based PCS Measurements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 177
+   175→ Akita: Lattice-Based PCS 5
+   176→
+   177→1 Introduction
+   178→Succinct non-interactive arguments of knowledge (SNARKs) are undergoing the same post-quantum transi-
+   179→tion as the rest of deployed cryptography, away from the elliptic curves that many SNARKs in production
+   180→today [45,41,26] are based on. Most SNARKs follow a common template: an information-theoretic polyno-
+   181→mial interactive oracle proof (PIOP) [29,27] composed with a polynomial commitment scheme (PCS) [55].
+   182→The migration thus concentrates in the PCS: replacing a curve-based PCS with a post-quantum one makes
+   183→the entire argument post-quantum.1
+   184→ In practice, this “post-quantum PCS” slot has been filled almost entirely by hash-based schemes: Reed-
+   185→Solomon-based protocols such as FRI [15], STIR [8], and WHIR [9]; general code-based multilinear com-
+   186→mitments such as Ligero [6], Brakedown [44], BaseFold [89], and Ligerito [81]; and the binary-field line of
+   187→Binius [34,35], Blaze [25], and Bolt [47]. These now underpin deployed proof systems at scale, including
+   188→Succinct’s SP1 [87], Lighter’s Plonky2-based exchange rollup [69], and the many provers in the Ethereum
+   189→Foundation’s real-time proving effort, Ethproofs [36,37].
+   190→ The dominant hash-based PCS paradigm gives up two advantages of elliptic-curve commitments that
+   191→matter: small proofs and pay-per-bit commitment time. On proof size, its concrete proofs commonly reach
+   192→hundreds of kilobytes: with proven soundness (that is, no reliance on conjectured proximity gaps [7,38]) and
+   193→practical code rates such as 1/2 or 1/4 (avoiding the prover slowdown of lower rates), the smallest proofs
+   194→(using WHIR) are O(λ2 log N + λ log2 N/ log log N ) asymptotically, where N is the polynomial size, and
+   195→at least 160KB for non-trivial instances P [9,67]. On commitment time, a curve-based commitment applies a
+   196→linear map directly to the data, m 7→ i mi Gi , for fixed public group elements Gi . Committing to a sparse
+   197→vector therefore costs only its support, the set of nonzero entries. The dominant Reed–Solomon-and-Merkle
+   198→construction instead commits to a dense error-corrected codeword, so its standard commitment procedure
+   199→processes the entire codeword even when the original vector is sparse.2
+   200→ Lattice-based PCSs recover both properties in principle: an Ajtai-style commitment applies a linear map
+   201→to a small-integer decomposition of the message, retaining pay-per-bit commitment time. Some schemes
+   202→achieve logarithmic-size opening proofs; among these, some attain concrete proof sizes as small as 50–
+   203→60 KB [78,76]. A flurry of recent constructions [16,78,76,52,56,57,58,53,51] has pushed the family toward
+   204→practicality, yet none is ready to be deployed, in a sense we make precise by looking at what our target
+   205→application demands.3
+   206→ Jolt [10,11] is a zero-knowledge virtual machine (zkVM) that proves correct execution of (64-bit) RISC-
+   207→V programs, and its Twist and Shout memory-checking arguments [86] commit to one-hot polynomials:
+   208→concatenations of standard basis vectors ej , one per execution step, with j the memory cell that step touched.
+   209→Hence, we first desire that commitments and openings exhibit pay-per-bit cost. Second, the opening protocol
+   210→must verify in tens of milliseconds rather than hundreds of milliseconds or seconds. Third, proof size should
+   211→be concretely small, tens of kilobytes rather than the hundreds that hash-based schemes pay, and finally,
+   212→security should rest on standard, well-studied assumptions. Jolt today uses Dory [68], a curve-based PCS
+   213→that satisfies all four, but is not post-quantum secure; a lattice-based PCS built on Ajtai commitments seems
+   214→to be the natural replacement.
+   215→ What, then, prevents Jolt from adopting an existing lattice-based PCS? For existing constructions, the
+   216→latter three requirements form a trilemma: each scheme achieves at most two of the three. Greyhound [78]
+   217→and Hachi [76] obtain small proofs from standard Module-SIS,4 but verify in time square-root in the polyno-
+   218→mial size. Alternate designs such as RoKoKo [58] and Grand Danois [53] reach polylogarithmic verification
+   219→1
+   220→ A rigorous proof requires security against quantum adversaries, which means, among other things, that Fiat-Shamir
+   221→ security needs to be in the quantum random oracle model (QROM); we discuss the status of Akita in Section 1.1.
+   222→2
+   223→ This linear cost is not inherent to every code. Systematic-code constructions such as Brakedown and Bolt [44,47]
+   224→ retain the original message as part of the codeword, and hence could benefit from one-hot or other highly repetitive
+   225→ structure, though the practical speedups remain unclear.
+   226→3
+   227→ The closest to deployment is the recent LaBRADOR-based zero-knowledge toolkit of Biasioli et al. [17], which
+   228→ extends the LaZer library with a concrete implementation. Its verification time is linear, as in LaBRADOR: on
+   229→ large instances, verification takes more than one second and runs at one-third to one-half of the proving time (see
+   230→ Tables 1 and 2 of [17]).
+   231→4
+   232→ Module-SIS (along with Module-LWE and their unstructured versions) are among the most well-studied lattice
+   233→ assumptions, with known worst-case-to-average-case reductions [2,60], an extensive history of cryptanalysis, and
+   234→ underlying the security of NIST-standardized ML-DSA [75].
+   235→6 Dao, Bodaghi, Khajehpour, Vitto et al.
+   236→
+   237→by leaning on stronger, more structured assumption variants (vanishing SIS [30]) that have received far less
+   238→cryptanalytic attention, and the former also on a heuristic challenge set ensemble. The final set of schemes
+   239→obtains polylogarithmic verification from standard lattice assumptions [23,3,31], but either gives no concrete
+   240→parameterization or carries proofs in the megabyte range. This trilemma is only the first obstacle. A de-
+   241→ployable PCS must also provide the specific capabilities that a zkVM requires. Namely, Jolt commits to its
+   242→execution trace, untrusted advice, and preprocessed program data at different stages of the protocol, includ-
+   243→ing offline stages, then opens them together in one proof, each commitment’s parameters fixed long before
+   244→the online commitments are known. Its prover must scale beyond a single machine for large statements;
+   245→its many interacting parameters must be chosen mechanically and auditably rather than by hand; and its
+   246→implementation must withstand scrutiny.5
+   247→ This brings us to the central question this paper sets out to answer:
+   248→
+   249→ Can we design and implement a lattice-based PCS with concretely small proofs, a fast
+   250→ verifier, and security from standard Module-SIS?
+   251→
+   252→
+   253→1.1 Our Contributions
+   254→
+   255→We answer this question with Akita, a new lattice-based PCS that satisfies all three properties. We build
+   256→on Greyhound and Hachi, which achieve small proofs under standard Module-SIS but retain a square-
+   257→root-time verifier [78,76]. Our new setup offloading technique reduces the verifier’s asymptotic work to
+   258→any constant root; with concrete parameter tuning, single-threaded verification takes less than 20 ms even
+   259→for a 230 -sized polynomial (Theorem 1.1 and Section 13). We also introduce techniques that substantially
+   260→improve Hachi’s central folding reduction, making its range checks and ring-relation checks cheaper and
+   261→its commitments smaller, and tune these techniques across the recursion to make folding to completion
+   262→practical. Our evaluation shows that Akita is competitive with existing lattice-based and hash-based PCSs,
+   263→and when integrated into Jolt, gives 1.3–2.2× faster proving and 2.2–7.4× faster verification, with proofs
+   264→remaining below 100 KB (Section 13). We prove noninteractive knowledge soundness of Akita in the classical
+   265→random oracle model (ROM); a proof in the quantum random oracle model (QROM) remains future work
+   266→(Sections 10 and 14).6
+   267→
+   268→Verifier offloading and constant-root verification. We start by isolating the two contributions to Hachi’s
+   269→verifier cost, and explain how we overcome the square-root barrier. For a multilinear polynomial represented
+   270→by N Boolean evaluations, Hachi divides these evaluations into B blocks; in the first fold, the verifier processes
+   271→B folding weights and evaluates a public commitment
+   272→ √ matrix on a block of length roughly N/B. These costs
+   273→sum to roughly B + N/B, minimized at B ≈ N ; using fewer blocks is offset by a larger matrix evaluation
+   274→(Section 9.1).
+   275→ We break this tradeoff by asking the prover to prove the matrix contribution using Akita itself. Since the
+   276→setup is public and fixed in advance, we can commit to the required setup prefixes during preprocessing.7
+   277→At opening time, an inner-product sum-check reduces the matrix computation to an evaluation of a setup
+   278→polynomial. We pass this opening to the next fold alongside the recursive-witness opening, so both claims
+   279→are checked in that fold against their respective commitments (Section 9). We can repeat this process in
+   280→subsequent folds until offloading no longer provides a benefit, then return to direct matrix evaluation.
+
+[showing lines 1-280 of 11079; use offset=281 with limit to continue reading]

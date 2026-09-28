@@ -1,0 +1,2411 @@
+        Serval: Slack-Free ℓ2 -Sound Polynomial
+             Commitments from Lattices
+
+    Lizhen ZHANG1 , Sherman S. M. Chow2 , Shang GAO1 , and Bin XIAO1
+           1
+                The Hong Kong Polytechnic University, Hong Kong, China
+               lizh6.zhang@connect.polyu.hk, shanggao@polyu.edu.hk
+                                b.xiao@polyu.edu.hk
+                       2
+                         Department of Information Engineering
+                         The Chinese University of Hong Kong
+                               smchow@ie.cuhk.edu.hk
+
+
+
+      Abstract. Polynomial commitment schemes (PCSs) are a core primi-
+      tive in modern proof systems, especially SNARKs. Lattice-based PCSs
+      are a natural post-quantum alternative, but existing constructions typi-
+      cally enforce lattice smallness only up to a multiplicative slack in the ex-
+      tracted ℓ2 norm. We present Serval, a lattice-based PCS with slack-free ℓ2
+      soundness (norm-preserving extraction) under standard SIS/LWE-type
+      assumptions. Following the norm-proof paradigm of Lyubashevsky et al.
+      (Crypto ’22), we reduce exact ℓ2 enforcement to a self-inner-product
+      argument plus a binary validation that avoids modular wraparound.
+      Our main technical insight is a reduction that rewrites the binary check
+      as inner-product-shaped constraints that match the algebraic form of
+      the PCS evaluation and commitment-consistency checks. This align-
+      ment yields a unified divide-and-conquer protocol that proves all con-
+      straints simultaneously in O(log L) rounds, giving succinct evaluation
+      proofs and efficient verification. At L = 220 and matched security param-
+      eters (λ = 128), our instantiated proof size is 8× smaller than Fenzi et al.
+      (JoC ’24) and 85× smaller than SLAP (Eurocrypt ’24), while remaining
+      compatible with the recent construction of Cini et al. (Crypto ’24).
+
+      Keywords: Lattice-based cryptography, Polynomial commitments
+
+
+1   Introduction
+A polynomial commitment scheme (PCS) lets a prover commit to a polynomial f
+using a commitment Com(f ), and later prove that a claimed value y equals f (x)
+(or f (⃗x) in the multilinear case) using a proof π. We write L for the dimension of
+the coefficient representation: L = D + 1 for a degree-D univariate polynomial,
+and L = 2n for an n-variate multilinear polynomial.
+    PCSs are a standard primitive in verifiable secret sharing [5], secure multi-
+party computation [10], authenticated data structures [26], and zero-knowledge
+succinct non-interactive arguments of knowledge (zkSNARKs) [8,14,17,16]. In
+particular, PCS verification is often a major cost driver in recursive and proof-
+carrying settings, motivating schemes with sublinear verification in L.
+     Many deployed PCSs are built from discrete-logarithm assumptions [29,13,27]
+and are vulnerable to quantum adversaries. Code-based alternatives [7,25] are
+post-quantum, but they typically do not provide algebraic structures that enable
+efficient composition (e.g., linear combinations and batching of claims). Lattice-
+based PCSs, in contrast, offer post-quantum security together with algebraic
+structure, making them a strong candidate for composable proof systems.
+     A central obstacle is to achieve norm-preserving extraction (no norm slack)
+without sacrificing efficiency. 3 At a high level, lattice soundness reduces to
+extracting a small-norm witness for a relation of the form:
+                         n                                  o
+                   R := (A, F, B; f⃗) : Af⃗ = F ∧ ∥f⃗∥2 ≤ B .
+
+The linear constraint Af⃗ = F is easy to verify, but enforcing the concrete ℓ2
+bound is substantially harder. Many lattice proof systems guarantee only that
+extraction succeeds with a slack factor, namely ∥f⃗∥2 ≤ αB for some α > 1.
+    This gap has been studied since early work on identification and proof proto-
+cols based on lattices [30,37]. A common approach is to shrink the challenge space
+to reduce slack, but this increases the soundness error and forces many repeti-
+tions. As a result, proof sizes become large, and while ring or module structures
+improve constants, they do not remove the basic tension between slack, challenge
+space, and efficiency.
+    A different line of work targets tight ℓ∞ bounds via algebraic identities.
+Representative works [21,20,4] transform element-wise constraints such as f⃗ ∈
+{0, ±1}n into the polynomial identity f⃗ ◦ (f⃗ − ⃗1) ◦ (f⃗ + ⃗1) = ⃗0, and verify it using
+techniques like Chinese remainder theorem (CRT) or number theoretic trans-
+form (NTT). These decompositions achieve slack-free ℓ∞ soundness for small
+alphabets (e.g., {0, ±1}), but their prover typically performs quasi-linear work
+in the vector length due to the required structured transforms. More importantly,
+a tight ℓ∞ bound is often not the right target for lattice-based proof systems.
+Many lattice primitives and reductions naturally control ∥ · ∥2 (e.g., via Gaus-
+sian sampling or noise growth), and enforcing a stringent ∥ · ∥∞ bound can force
+conservative parameters (e.g., larger moduli) while typically not strengthening
+the intended ℓ2 -based hardness statement.
+    More recent work targets ℓ2 norm proofs directly. Lyubashevsky [33] decom-
+poses an ℓ2 constraint into a quadratic inner-product relation together with an
+auxiliary linear bound, and proves both with linear prover time, proof size, and
+verification time. Beullens et al. [9] further reduces the resulting ℓ2 -soundness
+slack to a constant factor of 2 using a modular Johnson–Lindenstrauss argument.
+    Despite these advances, integrating norm proofs into structured lattice proof
+systems remains delicate, especially for lattice-based PCSs. A PCS must support
+fast evaluation proofs and preserve commitment reuse, batching, and aggrega-
+tion. Naive norm-proof integration can break one or more of these properties.
+As a result, existing lattice-based PCSs commonly handle lattice smallness using
+3
+    We target this guarantee under standard SIS/LWE-type assumptions, rather than
+    k-SIS-style variants or trapdoor-dependent auxiliary assumptions.
+
+
+                                            2
+small challenge spaces and a controlled slack factor, while concentrating opti-
+mization on the evaluation-proof component (see Appendix A).
+   This leaves a concrete gap: incorporate (exact) norm proofs into lattice-based
+PCSs while retaining sublinear evaluation verification and the structural advan-
+tages needed for composition. Our work addresses this gap.
+
+1.1   Related Work
+Recent lattice-based PCSs have achieved sublinear (often polylogarithmic) ver-
+ification for evaluation proofs using either inner-product arguments or recursive
+folding. Inner-product-based schemes encode evaluation as an inner product and
+prove an IPA together with commitment consistency [2,15,38,18]. They typi-
+cally obtain logarithmic proof size, but still require linear online work for at
+least one party. Some works further reduce online verification via preprocessing
+or delegation, at the cost of auxiliary keys/tables or additional setup complex-
+ity [11,23,29]. Recursive (split-and-fold) approaches verify evaluation through a
+recursion tree, yielding a polylogarithmic object checked by the verifier [7,22,3].
+Hybrid designs combine folding with proof-of-proof compaction, exemplified by
+Greyhound [36] and by transparent SIS-based schemes using FRI-style fold-
+ing [19,39].
+    Orthogonally, norm proofs introduce an additional soundness axis. Tight
+coefficient-set checks can be enforced via algebraic identities and structured
+transforms [21,20,4]. For ℓ2 bounds, more recent techniques reduce the sound-
+ness slack to a small constant (notably 2) via modular Johnson–Lindenstrauss
+arguments, and have been incorporated into compact proof systems such as
+LaBRADOR [9]. In lattice-based PCSs, this norm axis is commonly handled by
+tolerating slack so that evaluation proofs retain sublinear structure. Achieving
+slack-free ℓ2 soundness under standard SIS/LWE-type assumptions while pre-
+serving batching, aggregation, and sublinear verification remains less explored.
+    Serval addresses this gap by integrating slack-free ℓ2 enforcement into a struc-
+tured PCS framework without sacrificing succinct evaluation proofs and efficient
+verification. We provide a detailed comparison in Appendix A. Table 1 summa-
+rizes representative post-quantum PCSs along the axes most relevant to this
+work (setup, norm slack, and concrete proof size at matched security).
+
+1.2   Our Results
+We present a lattice-based PCS for univariate and multilinear polynomials that
+supports succinct evaluation proofs and enforces a slack-free ℓ2 norm bound for
+the extracted witness.
+    At a high level, we cast evaluation, commitment consistency, and range con-
+straints into arithmetic relations and reduce them to inner-product relations.
+For evaluation and commitment consistency, the inner product is taken with a
+public vector, while for range constraints it is taken with a private witness. Our
+construction follows a divide-and-conquer paradigm that treats all constraints
+uniformly. For a fixed security level, the proof size and verification time are
+
+                                         3
+Table 1. Comparison among post-quantum polynomial-commitment schemes: All sizes
+report prover-to-verifier communication only (in bytes) at 128-bit security, following
+the accounting in the cited sources.
+
+ Work Basis        Slack    T.S.      L = 215      L = 220     L = 225       L = 230
+ [25]    Hash   N/A           ✓       5.32MB 10.25MB† 50.34MB 186.31MB†
+ [39]    Hash   N/A           ✓            –   6.11MB       –         –
+ [22]    BASIS poly(L)        ×            –    3.4MB       –     8.3MB
+ [3]     M-SIS poly(L)        ×            –   36.5MB       –     767MB
+ [36]    M-SIS poly(L)        ✓            –        –    46KB      53KB
+ [19]    M-SIS   ≈2           ✓        120KB    501KB 1.51MB     5.17MB
+ Ours     M-SIS       1       ✓     259.16KB 436.03KB          2.56MB        3.59MB
+  1
+    Basis: hash/code-based, or lattice-based; M-SIS is standard (Module-)SIS, while
+    BASIS is a non-standard SIS-with-hints assumption [38].
+  2
+    Slack: the multiplicative factor α in the stated extraction/binding guarantee for
+                                                                             ˜
+    the lattice object that must be short for the security argument, i.e., ∥f⃗∥2 ≤ αB
+    (or the paper’s analogous statement). It is N/A for non-lattice schemes, poly(L)
+    when α grows with L, ≈2 for constant-factor slack, and 1 for slack-free extraction.
+  3
+    T.S.: whether the scheme supports a transparent setup.
+  4
+    Sources: Brakedown from [25, Fig. 8] (entries marked by † are interpolated from
+    adjacent reported points); Basefold from [39, Tab. 2]; Greyhound from [36, Tab. 1];
+    Fenzi et al., SLAP, and Cini et al. from the comparison in [19, Fig. 2].
+  5
+    Accounting: “–” indicates missing data.
+
+
+polylogarithmic in the size parameter L (measured in ring operations), and the
+prover runs in time linear in the witness length.
+
+Efficient evaluation and commitment-consistency proofs. We follow an
+inner-product-based approach for evaluation and use a leveled lattice-based vec-
+tor commitment [12] for the coefficient vector. Both the evaluation vector and the
+leveled commitment admit compatible tensor structures. This enables a log L-
+round split-and-fold protocol without preprocessing or CRS generation.
+
+Slack-free ℓ2 -norm enforcement via binary decomposition. Our norm
+enforcement follows the paradigm of Lyubashevsky et al. [33]. We prove the ℓ2 -
+norm constraint by proving (i) a quadratic self-inner-product relation with (ii)
+a coefficient bound strong enough to lift the modular statement to an integer
+statement. Concretely, for a claimed small norm f⃗ ∈ ZL·ℓ  q , we prove a statement
+                  ⃗  ⃗
+of the form (i) ⟨f , f ⟩ ≡ b (mod q) with a range constraint 0 ≤ b ≤ B 2 for a
+public bound B, and (ii) a bound ∥f⃗∥∞ ≤ U such that L · ℓ · U 2 < q/2. These
+imply ∥f⃗∥22 ≤ L · ℓ · ∥f⃗∥2∞ ≤ L · ℓ · U 2 < q/2, so the integer value ⟨f⃗, f⃗⟩ equals
+its residue modulo q. Thus, the bound 0 ≤ b ≤ B 2 yields the desired slack-
+free guarantee ∥f⃗∥2 ≤ B. Accordingly, the extractor’s output satisfies the same
+
+
+                                           4
+bound B stated in the relation (no multiplicative loss), provided the coefficient
+bound ensures ⟨f⃗, f⃗⟩ ∈ [0, q/2) so that the centered representative coincides with
+the integer squared norm.
+    In our construction, the coefficient vector is constrained to be binary. This al-
+lows us to guarantee the ℓ∞ -norm bound by directly proving the binary property,
+rather than relying on an approximate ℓ∞ bound as Lyubashevsky et al. [33].
+    Accordingly, for a large-norm vector over ZL         q , the decomposition length is set
+to ℓ = ⌈log q⌉ via an unsigned base-2 decomposition. This is a standard design
+choice in various lattice-based primitives, most notably the GSW cryptosystem
+[24]. We note, however, that compared to schemes such as Greyhound [36] which
+employ a larger base, this choice increases the witness size by a constant fac-
+tor, thereby marginally raising the prover’s computational overhead in practice.
+Nonetheless, the asymptotic complexity remains unaffected, and this binary de-
+composition provides significant structural advantages for both the verification
+process and the efficiency of proof construction.
+    To prove the inner-product relation, we use a standard divide-and-conquer
+protocol that reduces a length-L · ℓ inner product to length-L · ℓ/2 recursively,
+resulting in log L rounds. To prove binarity, we start from the arithmetic condi-
+tion f⃗ ◦ (f⃗ − ⃗1) = ⃗0 and reduce it to a single inner-product consistency check:
+for verifier-sampled α  ⃗ , ⟨f⃗ ◦ α
+                                  ⃗ , f⃗⟩ = ⟨f⃗, α
+                                                 ⃗ ⟩. Crucially, this relation has the same
+algebraic shape as the self-IPA and the evaluation/commitment constraints, so
+it can be handled by the same split-and-fold machinery in O(log L) rounds.
+
+
+Working over the modular ring. Our protocol is defined over a modular
+ring Rq . Embedding coefficient constraints over Zq into Rq is straightforward via
+standard coefficient mappings and ring automorphisms. The ring setting also ad-
+mits large challenge spaces (e.g., of size about 2λ with appropriate parameters),
+which reduces the soundness error.
+
+
+Concrete efficiency. After applying our optimizations, the resulting PCS
+achieves O(log L) proof size and O(log L) verification complexity for a fixed
+security level (measured in ring elements/operations). Table 1 summarizes the
+concrete comparison at 128-bit security along the axes most relevant to this work
+(setup, norm slack, and proof size). At L = 220 , our instantiation is smaller than
+the reported proof sizes of Fenzi et al. [22] and SLAP [3], and remains compatible
+with the transparent SIS-based construction of Cini et al. [19]. Compared with
+Greyhound [36], our proof size is larger due to the structure limit and additional
+cost of exact range enforcement, while our verifier is faster at larger L as shown
+in Section 5.2.
+
+
+1.3   Technique Overview
+
+Let Rq := Zq [X]/(X d + 1) be the power-of-two cyclotomic ring of dimension d.
+We write σ−1 : Rq → Rq for the ring automorphism induced by σ−1 (X) = X −1
+
+
+                                             5
+                                                                         N κℓ/2
+                                                            cmin,0 ∈ Rq
+                                    ⃗s ∈ RN
+                                          q
+                                            ℓ
+                                                               −1                
+                                                          =G            IN/2 ⊗ A0 · ⃗
+                                                                                    s
+                                                               σ, N κ
+                                                                  2
+
+
+
+
+                      N κℓ/8                                        N κℓ/4
+          cmin,2 ∈ Rq                                    cmin,1 ∈ Rq
+          −1                                            −1                 
+        =G N        IN/8 ⊗ A2 · cmin,1                 =G N        IN/4 ⊗ A1 · cmin,0
+          σ,   κ                                         σ,   κ
+             8                                              4
+
+                        .
+                        .
+                        .
+                        2κℓ
+      cmin,log N −2 ∈ Rq                                                                κ
+                                                    cm = Alog N −1 · cmin,log N −2 ∈ Rq
+        −1                   
+     = Gσ,2κ   I2 ⊗ Alog N −2 · cmin,log N −3
+
+
+Fig. 1. A log N -level Ajtai commitment scheme instantiated following [12] (G−1 de-
+notes the decomposition operation)
+
+
+in the quotient, ct(·) for the constant-term map and coef(·) for the coefficient
+vector over Zq of a ring element. We write N for the PCS size parameter (with
+N · d = L in Section 1) and ℓ for the decomposition expansion factor.
+
+A unified relation. We reduce both univariate and multilinear PCS in the
+lattice setting to the task of proving that a witness ⃗s ∈ RN        q
+                                                                       ℓ
+                                                                         satisfies the
+following four constraints: (i) The commitment constraint fixes the commit-
+ted value: Com(⃗s) = cm; (ii) The evaluation consistency constraint, which is a
+tensor-structured linear relation between coef(⃗s) and public vectors (⃗ai ), yield-
+ing a public value
+                     v (Section 4); (iii) A quadratic self-inner-product condition:
+ct ⟨⃗s, σ−1 (⃗s)⟩ = b mod q together with a range bound b ≤ β 2 ; and (iv) The co-
+efficient constraint enforces binarity: coef(⃗s) ∈ {0, 1}N ℓd . Lemma 2 shows that
+the quadratic constraint together with binarity implies a slack-free ℓ2 bound by
+ruling out modular wraparound.
+     We instantiate Com using the log N -level Ajtai commitment [12] (Figure 1),
+and the prover maintains intermediate commitments as private state.
+
+One split-and-fold engine for all constraints. Each of the above constraints
+admits the same divide-and-conquer structure. At a high level, we repeatedly
+split the witness (along with private states) into halves, send constant-size aux-
+iliary claims for the two halves, and fold them using a verifier challenge. After
+log N rounds, verification reduces to checking a base instance of constant size.
+We use this engine for commitment consistency, the tensor-structured linear
+constraint, and the quadratic self-inner-product constraint.
+
+Binarity as an inner-product-shaped constraint. Let ⃗s := coef(⃗s). Bina-
+rity is equivalent to the component-wise equation ⃗s ◦ (⃗s − ⃗1) = ⃗0. We reduce it to
+a single randomized inner-product consistency check: for a verifier-sampled α       ⃗,
+
+
+                                                6
+⟨⃗s ◦ α
+      ⃗ , ⃗s⟩ = ⟨⃗s, α
+                     ⃗ ⟩. Crucially, after embedding into Rq via the standard coefficient
+mapping, this check has the same algebraic shape as the linear and quadratic
+constraints, and is handled by the same split-and-fold engine.
+
+
+Proof-size optimization via Fiat–Shamir and LaBRADOR. The pro-
+tocol above has log N rounds and produces per-round constant-size subclaims.
+We apply the Fiat–Shamir transform in the random-oracle model by deriving
+each verifier challenge from the transcript-so-far. We then apply LaBRADOR
+to compress the resulting log-round transcript into a succinct proof. The final
+proof comprises this succinct proof along with a short reconstruction seed (see
+Section 5.1).
+
+
+2     Preliminaries
+
+We review the essential preliminaries. Further background and auxiliary techni-
+cal material are deferred to Appendix B.
+
+
+2.1   Notation
+
+Let λ be the security parameter, implicitly given to all algorithms. All parameters
+are bounded by poly(λ) unless explicitly defined. A function negl(λ) is negligible.
+For n ∈ N, define [n] := {0, 1, . . . , n − 1}. For integers a < b, define [a : b] :=
+{a, a+1, . . . , b−1}. Let q be a prime modulus. Let Z be the set of integers. Define
+Zq := Z/qZ. When taking absolute values and norms, we identify each x ∈ Zq
+with its centered representative in {−(q − 1)/2, . . . , (q − 1)/2}. Vectors in Znq are
+written as f⃗ = (f0 , . . . , fn−1 ). Matrices over Zq are denoted by uppercase letters.
+Let Im be the identity matrix of size m × m. Let ⊗ be the Kronecker product.
+    Let Zq [X] be the ring of polynomials over Zq , and let d be a power of two.
+Define R := Z[X]/(X d + 1) and Rq := Zq [X]/(X d + 1). We reserve the no-
+tation R for relations. Ring elements are in bold (e.g., f ∈ Rq ), except for
+                                     Pd−1
+challenges c ∈ C. For f := i=0 fi X i ∈ Rq , define ct(f ) := f0 and coef(f ) :=
+f⃗ = (f0 , f1 , . . . , fd−1 ). Bold uppercase letters denote matrices over Rq . For size-n
+vectors ⃗f and ⃗g, their concatenation is (⃗f , ⃗g) ∈ R2n  q . For matrices A, B ∈ Rq
+                                                                                      m×n
+                                                                                           ,
+                            m×2n                        n
+we write [A B] ∈ Rq               . For a vector ⃗a ∈ Rq , the i-th entry is denoted as ai
+or a[i].
+
+                      Pd−1       i
+                                                                    Pd−1
+Norms.
+qP         For f :=      i=0 fi X ∈ Rq , we define ∥f ∥1 :=           i=0 |fi |, ∥f ∥2 :=
+      d−1 2                                        ⃗                            m
+      i=0 fi , and ∥f ∥∞ := maxi∈[d] |fi |. For f := (f0 , . . . , fm−1 ) ∈ Rq , define
+                                 qP
+             m−1                      m−1
+∥⃗f ∥1 := i=0 ∥fi ∥1 , ∥⃗f ∥2 :=               2        ⃗
+          P
+                                      i=0 ∥fi ∥2 , and ∥f ∥∞ := maxi∈[m] ∥fi ∥∞ . The
+                                                           √
+ℓ∞ -norm and ℓ2 -norm of ⃗f satisfy ∥⃗f ∥∞ ≤ ∥⃗f ∥2 ≤ md ∥⃗f ∥∞ . Unless stated
+otherwise, ∥ · ∥ refers to the ℓ2 -norm.
+
+
+                                             7
+Challenge space. We call C ⊂ Rq a challenge space if, for all distinct c, c′ ∈ C,
+the difference c − c′ is invertible in Rq . We also require bounds ∥c∥ ≤ τ and
+∥c∥op,∞ ≤ T for all c ∈ C, where τ, T ∈ Z. Here, ∥c∥op,∞ := supv∈Rq \{0} ∥cv∥  ∞
+                                                                            ∥v∥∞ .
+In our instantiation, C is chosen so that c − c′ falls in the invertible regime of
+Lemma 1 for all distinct c, c′ ∈ C.
+
+Lemma 1 (Invertibility in Polynomial Rings [34]). Let d > 1 be a power
+p two, and let q be a prime with q ≡ 5 mod 8. Then any f ∈ Rq with 0 < ∥f ∥2 <
+of
+   q/2 is invertible in Rq .
+
+Gadget-matrix decomposition. Let a ∈ N. Define the gadget vector ⃗ga := (1, a, a2 ,
+. . . , aι−1 ), where ι := ⌈loga q⌉. Define the gadget matrix Ga,m := Im ⊗ ⃗gaT ∈
+Zm×m·ι
+   q       . We use G−1a,m (·) as notation for the (base-a) gadget decomposition op-
+erator, not a matrix inverse. For A ∈ Rm×n      q   , define Ã := G−1         ιm×n
+                                                                    a,m (A) ∈ Rq
+(applied coefficient-wise over Rq ) such that A = Ga,m Ã. We write G−1     m when
+the basis a is clear.
+
+ Conjugation automorphism. Let σ−1 : Rq → Rq be the conjugation automor-
+ phism induced by σ−1 (X) = X −1 in the quotient Rq = Zq [X]/(X d + 1). Equiva-
+                Pd−1                           Pd−1
+ lently, for f = i=0 fi X i ∈ Rq , σ−1 (f ) = i=0 fi X −i , where exponents are
+ interpreted modulo X d + 1. Let ⃗a, ⃗b ∈ Zndq   be coefficient representations of
+                                                                 D           E
+⃗a, b ∈ R . The coefficient inner product satisfies ⟨⃗a, ⃗b⟩ = ct σ−1 (⃗a), ⃗b .
+    ⃗
+         q
+          n
+
+
+
+Exact ℓ2 -norm constraint decomposition. An exact ℓ2 -norm constraint can be
+decomposed into the 2 sub-constraints as defined below.
+Lemma 2. When q > 2N ℓd, enforcing a slack-free ℓ2 -norm bound on ⃗f ∈ RN         q
+                                                                                    ℓ
+
+reduces to the following two constraints, ignoring zero-knowledge aspects:
+                                                                           
+  – A self-inner-product constraint in the ring setting: ct ⟨⃗f , σ−1 (⃗f )⟩ = b mod
+   q and 0 ≤ b ≤ B 2 , where B is the prescribed valid norm bound.
+ – A bit constraint on all coefficients: coef(⃗f ) ∈ {0, 1}N ℓd .
+
+
+Proof. Under the bit constraint, ∥⃗f ∥∞ = 1,           ⃗2
+                                                   so |f |2 ≤ N ℓd. For q > 2N ℓd,
+the centered representative of ct ⟨⃗f , σ−1 (⃗f )⟩ ∈ Zq equals its integer value |⃗f |2 .
+                                                                                       2
+
+Hence, proving b ≤ B suffices to ensure |⃗f |22 ≤ B 2 .
+                        2
+                                                                                       ⊔
+                                                                                       ⊓
+
+
+2.2   Lattice Problems and Leveled (Ajtai) Commitments
+
+We recall the standard module-SIS (M-SIS) assumption [28].
+
+Definition 1 (M-SISκ,n,q,β ). Given a random matrix A ∈ Rκ×n     q    for n > κ,
+M-SIS is to find a non-zero ⃗z ∈ Rnq such that A⃗z = ⃗0 over Rq and ∥⃗z∥ ≤ β.
+
+
+                                           8
+Definition 2 (Ajtai Commitment [1]). Let κ, q, β be positive integers. For
+messages that are an n-dimensional short vector ⃗f ∈ Rnq with ∥⃗f ∥ ≤ β:
+ – Setup(1λ ): Sample a matrix A ← Rκ×nq . Output pp := A.
+ – Commit(pp, ⃗f ): Output cm := A⃗f .
+
+A commitment scheme is binding if it is computationally infeasible to find two
+distinct openings for the same commitment, and hiding if it reveals no informa-
+tion about the committed message. Ajtai commitment is binding for openings
+with ∥⃗f ∥ ≤ β under the M-SISκ,n,q,2β assumption. Hiding can be achieved by
+appending a small random vector to the message, and throughout our protocols
+we treat this randomness as part of the witness.
+
+2.3    LaBRADOR Relation
+We recall the LaBRADOR relation [9]:
+                                                                                   
+         
+                                           f (⃗z0 , . . . ,⃗zr−1 ) = 0 ∀f ∈ F,     
+                                                                                    
+                 ′                                ′                           ′   ′
+ RLab = ((F, F , β), (⃗z0 , . . . ,⃗zr−1 )) ct(f (⃗z0 , . . . ,⃗zr−1 )) = 0 ∀f ∈ F , .
+                                            Pr−1
+                                                      ∥⃗z ∥2 ≤ β 2
+         
+                                                                                   
+                                                                                    
+                                                          i=0     i 2
+
+Here, F is a family of quadratic dot product functions f : Rnq × · · · × Rnq → Rq
+of the form
+                                           r−1
+                                           X                            r−1
+                                                                        X
+               f (⃗z0 , . . . ,⃗zr−1 ) =           αi,j ⟨⃗zi ,⃗zj ⟩ +       ⟨⃗
+                                                                             φi ,⃗zi ⟩ − b,   (1)
+                                           i,j=0                        i=0
+
+where αi,j ∈ Rq , b ∈ Rq , and φ ⃗ i ∈ Rnq for n, r ≥ 0. The family F ′ contains
+           ′
+functions f of the same form as in Eq. 1, and the relation constrains only their
+constant terms via ct(·).
+   The proof size of LaBRADOR is O(log log N ) for N = n · r, where r = N 1/3
+and n = N 2/3 . It supports quasi-linear verification and proving time [9].
+
+3     Serval: Efficient Proofs for Constructing PCS
+3.1    Generalized Relation
+We consider the relation Rmain below using the notation in Section 2.1. We show
+in Section 4 that both univariate and multilinear polynomial evaluation proofs
+in the lattice setting can be reduced to Rmain .
+                                                                                      
+            (cm  ∈ R κ
+                        , β ∈ Z q ),               Com(⃗s) = cm,                       
+                     q                                                                
+           (v, b ∈ Zq , (⃗ai ∈ Zbi )i∈[log N ] ), ⟨coef(⃗s), Nlog N −1 ⃗ai ⟩ = v,
+          
+                                                                                      
+                                                                                       
+                                                                                       
+                                   q                              i=0
+ Rmain =                    N
+                               κι
+                                                                                       .
+          
+            (cmin,i ∈ Rq2i+1 )i∈[log N −1] ,      ct ⟨⃗s, σ−1 (⃗s)⟩ mod q = b ≤ β 2 , 
+                                                                                       
+           (⃗s ∈ RN  ℓ
+                                                                                      
+                    q )
+                                                                                      
+                                                   coef(⃗s) ∈ {0, 1}N ℓd
+                                                                                       
+                                                                                       (2)
+Here, we set b0 := 2ℓd and bi := 2 for all i ∈ [1 : log N ].
+
+
+                                                      9
+3.2    Core Protocol
+We present the commitment, linear, and quadratic checks separately to describe
+their local claims.
+
+Commitments. We use the leveled Ajtai commitment scheme [12] for the wit-
+ness in Rmain . Here, “leveled” refers to a tree-structured composition of linear
+maps together with gadget decomposition.                                 Qk−1
+   Concretely, let ⃗s ∈ RN q
+                             ℓ
+                               be a short-norm witness and let N = i=0 mi .
+Let A0 ∈ Rκ×mq
+                 0ℓ
+                    , Ai ∈ Rqκ×mi κι for i ∈ [1 : k − 1] be public matrices, where
+ι = ⌈logσ q⌉ for a decomposition base σ. We write Gσ,m for the gadget matrix
+from Section 2.1, and we use G−1  σ,m (·) for the standard gadget decomposition
+                                  Q  k−1
+applied entry-wise. Define ni := j=i mj for i ∈ [k]. The commitment to ⃗s is
+                           
+      cm = Ak−1 · G−1              −1                    −1
+                                                                             
+                   σ,nk−1 κ · · · Gσ,n2 κ (In2 ⊗ A1 ) · Gσ,n1 κ (In1 ⊗ A0 )⃗
+                                                                           s .
+
+    This structured composition yields a compact commitment and is widely
+used in lattice proof systems. For example, LaBRADOR [9] and Greyhound [36]
+employ a two-level construction (i.e., k = 2), while Cini et al. [19] adopt a log N -
+level variant with the additional constraint that all matrices Ai are identical.
+    In our protocol, we fix N = 2k and therefore have k = log N . For every level
+i ∈ [1 : log N ], we use matrices Ai ∈ Rκ×2κι   q      , together with a base-level matrix
+A0 ∈ Rκ×2ℓ
+         q   . The prover maintains a private state consisting of all intermediate
+commitments cmin,i for i ∈ [log N − 1], defined by
+                                                                                     
+        cmin,i := G−1
+                    σ,ni+1 κ   (In i+1
+                                       ⊗ A i ) G −1
+                                                 σ,ni κ  · · · G−1
+                                                                σ,n1 κ (In 1
+                                                                             ⊗ A 0  s
+                                                                                   )⃗     ,
+
+where ni+1 := N/2 i+1 . These intermediate values satisfy the recurrence relation
+                                                 
+      cmin,i+1 = G−1
+                   σ,ni+2 κ (Ini+2 ⊗ Ai+1 ) cmin,i ,    i ∈ [0 : log N − 3],
+
+and the final commitment satisfies Alog N −1 · cmin,log N −2 = cm.
+
+Commitment Constraint Proof. The commitment consistency constraint
+in Rmain can be verified recursively by exploiting the leveled structure and the
+algebraic relations between intermediate commitments.
+    The top-level relation is
+
+                             Alog N −1 · cmin,log N −2 = cm.                           (3)
+
+The prover sends the pair (cm1,L , cm1,R ) := cmin,log N −2 ∈ R2κι      q . The verifier
+checks Equation (3).
+    The verifier samples a random challenge ⃗c1 = (c1,0 , c1,1 ) ∈ C 2 . The prover
+folds the witness ⃗s = (⃗sL ∥⃗sR ) as ⃗s2 := c1,0 ⃗sL + c1,1 ⃗sR , and folds each stored
+intermediate commitment entry-wise in the same manner. The prover then sends
+
+
+                                            10
+the next pair (cm2,L , cm2,R ), corresponding to the folded intermediate commit-
+ment one level below.
+    The verifier checks the folding step by using the defining recurrence of the
+leveled commitment. In particular, letting Gσ,κ be the gadget matrix from Sec-
+                                 (cm) ?                                      
+tion 2.1, it checks Alog N −2 ·π2     = c1,0 Gσ,κ ·cm1,L +c1,1 Gσ,κ ·cm1,R , where
+  (cm)
+π2     := (cm2,L , cm2,R ) ∈ R2κι
+                               q   denotes the updated message sent by the prover.
+The verification proceeds recursively for log N rounds. Each round reduces the
+commitment level by one and halves the witness length along the N axis.
+    After log N rounds, the prover obtains a folded witness ⃗slog N ∈ R2ℓ      q . The
+prover sends ⃗slog N to the verifier. The verifier checks that ⃗slog N correctly opens
+the final folded commitment obtained through the recursion.
+                                                    (cm)      (cm)             (cm)
+    Overall, the proof transcript is π (cm) = π1 , . . . , πlog N , where πi         =
+                                                                     (cm)
+(cmi,L , cmi,R ) ∈ R2κι
+                    q   for i ∈ [1 : log N − 1] and πlog N = ⃗slog N ∈ R2ℓ
+                                                                        q .
+    Ajtai commitment is binding under M-SIS, which requires an explicit up-
+per bound on the norm of the committed vector. To ensure that the norm of
+the folded witnesses remains within the binding regime throughout the recur-
+sion, the challenge space C must be chosen carefully. Section 3.6 discusses the
+corresponding parameter selection.
+
+Linear Constraint Proof. We next prove the inner product between coef(⃗s)
+     Nlog N −1
+and    i=0     ⃗ai . This constraint can be proved in log N rounds by exploiting
+the recursive decomposability of the tensor product, which reduces the original
+inner product to lower-dimensional inner products via successive folding.
+   Define the ring vector
+                 d−1
+                X                   d−1
+                                     X                             d−1
+                                                                   X
+                       a0,i X −i ,         a0,i+d X −i , . . . ,         a0,i+(2ℓ−1)d X −i ∈ R2ℓ
+                                                                                          
+       ⃗a0 :=                                                                                 q .
+                 i=0                 i=0                           i=0
+
+Then
+                                   N −1
+                                logO                                N −1
+                                                                 logO
+                                                                                       !
+                                                                             
+                   coef(⃗s),                ⃗ai = ct       ⃗s,             ⃗ai ⊗ ⃗a0       .
+                                     i=0                           i=1
+                            Nlog N −2
+   Let ⃗a(log N −2) := ( i=1          ⃗ai ) ⊗ ⃗a0 . Write ⃗s = (⃗sL ∥⃗sR ). By the tensor-
+product decomposition of the last factor, we have
+  D                             E D                                                         E
+   ⃗s, ⃗alog N −1 ⊗ ⃗a(log N −2) = ⃗alog N −1 , ⟨⃗sL , ⃗a(log N −2) ⟩, ⟨⃗sR , ⃗a(log N −2) ⟩ .
+
+    Then, the prover sends v1,L := ⟨⃗sL , ⃗a(log N−2) ⟩, v1,R := ⟨⃗sR , ⃗a(log N −2) ⟩. The
+verifier checks that ct ⟨⃗alog N −1 , (v1,L , v1,R )⟩ = v. It then verifies the correct-
+ness of (v1,L , v1,R ) via recursion.
+    The verifier samples a challenge ⃗c1 = (c1,0 , c1,1 ) ∈ C 2 . The prover folds the
+witness as ⃗s2 := c1,0 ⃗sL + c1,1 ⃗sR . The verifier reduces the claim to
+                        D                  E
+                                             ?
+                         ⃗s2 , ⃗a(log N −2) = c1,0 v1,L + c1,1 v1,R .
+
+
+                                                      11
+This procedure proceeds recursively for log N − 1 rounds, halving the witness
+length in each round along the N axis.
+    In the final round, the prover sends the folded witness ⃗slog N ∈ R2ℓ     q . The
+verifier computes ⟨⃗slog N , ⃗a0 ⟩ locally and checks that it matches the reduced
+                                                                   (lin)        (lin) 
+claim. The proof transmitted by the prover consists of π (lin) = π1 , . . . , πlog N ,
+             (lin)                                                            (lin)
+where πi             = (vi,L , vi,R ) ∈ R2q for i ∈ [1 : log N − 1] and πlog N = ⃗slog N ∈ R2ℓ
+                                                                                            q .
+
+
+
+Quadratic Constraint Proof. We adopt a divide-and-conquer strategy to
+prove the quadratic (self-inner-product) constraint.
+    Write ⃗s = (⃗sL ∥⃗sR ). Then ⟨⃗s, σ−1 (⃗s)⟩ = ⟨⃗sL , σ−1 (⃗sL )⟩ + ⟨⃗sR , σ−1 (⃗sR )⟩. The
+prover sends L1 := ⟨⃗sL , σ−1 (⃗sL )⟩, R1 := ⟨⃗sR , σ−1 (⃗sR )⟩ to the verifier. The verifier
+checks ct(L1 + R1 ) ≡ b (mod q).
+    However, (L1 , R1 ) alone do not support recursion. The verifier samples ⃗c1 =
+(c1,0 , c1,1 ) ∈ C 2 and the prover folds ⃗s2 := c1,0 ⃗sL + c1,1 ⃗sR . Expanding the next-
+round quadratic value gives
+
+   ⃗s2 , σ−1 (⃗s2 ) = c1,0 σ−1 (c1,0 ) L1 + c1,1 σ−1 (c1,1 ) R1
+                            + c1,0 σ−1 (c1,1 ) ⃗sL , σ−1 (⃗sR ) + c1,1 σ−1 (c1,0 ) ⃗sR , σ−1 (⃗sL ) .
+
+ This uses multiplicativity of σ−1 on Rq , i.e., σ−1 (ab) = σ−1 (a) σ−1 (b) for all
+                                                                                 (1)
+ a, b ∈ Rq . Therefore, the prover additionally sends the cross terms M1 :=
+                      (2)                              (qua)          (1)  (2)
+ ⟨⃗sL , σ−1 (⃗sR )⟩, M1 := ⟨⃗sR , σ−1 (⃗sL )⟩. Given π1      = (L1 , M1 , M1 , R1 ) and
+⃗c1 , the prover and verifier can then perform the recursive check on ⃗s2 .
+                      (1) (2)
+      Given (L1 , M1 , M1 , R1 ) and ⃗c1 , the original self–inner-product constraint
+                                              (qua) (qua)
+ reduces to checking ⟨⃗s2 , σ−1 (⃗s2 )⟩ = ⟨⃗c1 , π1 ⟩, where
+        (qua)                                                                                
+       ⃗c1           = c1,0 σ−1 (c1,0 ), c1,1 σ−1 (c1,1 ), c1,0 σ−1 (c1,1 ), c1,1 σ−1 (c1,0 ) .
+
+The recursion then proceeds by applying the same split-and-fold step to ⃗s2 .
+    To align with the previous two sub-proofs, we run log N (rather than log(N ℓ))
+rounds by folding only along the N axis. The quadratic-constraint transcript
+                (qua)      (qua)         (qua)           (1)   (2)
+is π (qua) = π1 , . . . , πlog N , where πi     = (Li , Mi , Mi , Ri ) ∈ R4q for
+                                      (qua)
+ i ∈ [1 : log N − 1] and πlog N = ⃗slog N ∈ R2ℓ      q . The verifier locally computes
+ ⟨⃗slog N , σ−1 (⃗slog N )⟩ and checks that it matches the final reduced claim.
+      Since all these proofs share the same structure, we use the same per-round
+ challenge ⃗ci across all sub-proofs, and the prover sends the final folded witness
+⃗slog N only once.
+
+
+3.3    Binary Range Proof
+
+We enforce coef(⃗s) ∈ {0, 1}N ℓd by reducing the component-wise constraint ⃗s ◦
+(⃗s − ⃗1) = ⃗0 to a collection of inner-product constraints, which are handled using
+the same log N -round recursion as in Section 3.2. Here, ⃗s := coef(⃗s) ∈ ZN q
+                                                                               ℓd
+                                                                                  .
+
+
+                                                     12
+Randomized binarity check. The verifier samples α ← Zq and defines α
+                                                                   ⃗ :=
+(1, α, α2 , . . . , αN ℓd−1 ) ∈ ZN
+                                 q
+                                   ℓd
+                                      . If ⃗
+                                           s ∈ {0, 1}N ℓd
+                                                          , then
+
+              α ◦ ⃗s, ⃗s − ⃗1⟩ = 0,
+             ⟨⃗                           equivalently       ⟨⃗
+                                                              α ◦ ⃗s, ⃗s⟩ = ⟨⃗
+                                                                             α, ⃗s⟩.
+                                                         N ℓd−1 2
+                        / {0, 1}N ℓd , then P (α) :=            (si − si ) αi is a non-zero
+                                                       P
+ Conversely, if ⃗s ∈                                     i=0
+ polynomial of degree at most N ℓd − 1, and therefore Prα←Zq P (α) = 0 ≤ Nqℓd .
+ Let vα := ⟨⃗α, ⃗s⟩ ∈ Zq and ⃗sα := ⃗s ◦ α ⃗ . We embed ⃗sα into
+                                                                the ring by introducing
+        N ℓ
+⃗sα ∈ Rq with coef(⃗sα ) = ⃗sα , so that ct ⟨⃗sα , σ−1 (⃗s)⟩ = ⟨⃗sα , ⃗s⟩ = vα .
+     To expose vα as a tensor-structured linear constraint compatible with our
+ recursion, we decompose α       ⃗ as follows. Let
+                                                         i−1
+ ⃗ 0 := (1, α, . . . , α2ℓd−1 ) ∈ Z2ℓd       ⃗ i := 1, α2 ·2ℓd ∈ Z2q for i ∈ [1 : log N ],
+                                                                
+ α                                 q ,       α
+                Nlog N −1                   D          Nlog N −1 E
+ so that α
+         ⃗ = i=0            α⃗ i and hence coef(⃗s), i=0          α⃗ i = vα .
+
+
+Certifying well-formedness of ⃗sα . To ensure coef(⃗sα ) = ⃗s ◦ α
+                                                                ⃗ , the verifier
+samples an additional challenge r ← Zq and defines
+
+         ⃗r := (1, r, . . . , rN ℓd−1 ),               ⃗ = (1, rα, . . . , (rα)N ℓd−1 ).
+                                           ⃗rα := ⃗r ◦ α
+
+Then coef(⃗sα ) = ⃗s ◦ α
+                       ⃗ implies ⟨coef(⃗sα ), ⃗r⟩ = ⟨coef(⃗s), ⃗rα ⟩. Both ⃗r and ⃗rα admit
+tensor decompositions analogous to α     ⃗ ; we therefore reduce this check to two
+tensor-structured linear constraints whose outputs are compared.
+
+  Commitment order. The challenge r must be sampled only after the prover
+  has fixed ⃗sα . Otherwise, knowing (α, r) allows the prover to choose a fabricated
+⃗˜sα that matches the required inner products at the single evaluation point r
+  while differing from ⃗s ◦ α ⃗ elsewhere. We therefore commit to (a decomposition
+  of) ⃗sα before receiving r.
+      Concretely, we decompose ⃗sα in base σα into ια := ⌈logσα q⌉ pieces and
+  concatenate them as ŝα ∈ RN      q
+                                      ℓια
+                                          such that Gσα ,N ℓ ŝα = ⃗sα . We then commit
+  to ŝα using the same log N -level structure as in Section 3.2, with public matrices
+  Bi ∈ Rκ×2κι
+           q      for i ∈ [1 : log N ], B0 ∈ Rκ×2ℓι
+                                               q
+                                                   α
+                                                     .
+      ŝα is used only to help establish binarity of the original witness, so a loose
+  norm bound on ŝα suffices.
+
+Protocol repetition. In summary, the binary-check protocol proceeds as fol-
+lows. The verifier samples α; the prover forms ⃗sα , decomposes it, and sends
+cmα := Com(ŝα ). The verifier then samples r and the parties prove the claims
+below via the recursion from Section 3.2 (with the quadratic protocol used in its
+bilinear form):
+ 1. D
+    Com(ŝα ) = cmα ;
+              Nlog N −1 E
+ 2. coef(⃗s), i=0      α
+                       ⃗ i = vα ;
+
+
+                                               13
+ 3. ⟨coef(⃗s), ⃗rα ⟩ = vrα ;
+ 4. ⟨coef(Gσα ,N ℓ ŝα ), ⃗r⟩ = vr and vr = vrα ;
+ 5. ct(⟨Gσα ,N ℓ ŝα , σ−1 (⃗s)⟩) = vα .
+
+   That is, at each round i ∈ [1, log N ], the binary proof consists of the following
+components:
+
+           (bin)      (cm,α)      (lin1 ,α)      (lin2 ,α)          (lin3 ,α)      (qua,α) 
+          πi       = πi        , πi           , πi             , πi             , πi           ∈ R2κι+10
+                                                                                                  q      .
+
+In the final round, the prover directly sends ŝα,log N ∈ R2ℓι
+                                                           q .
+    Each randomized reduction in the binary-check protocol incurs a soundness
+error of at most 2N ℓd/q. To drive this error down to the negligible
+                                                                    level 2−λ , we
+                                                                                                     λ
+repeat the protocol t times using fresh α values, where t :=                                                    .
+                                                                                                log q/(N ℓd)
+
+
+
+Discussion (binary check alignment). A generic lattice range proof could certify
+coef(⃗s) ∈ {0, 1}N ℓd , but it would be structurally misaligned with the PCS re-
+cursion and would introduce an additional proof subsystem. We instead use the
+randomized identity ⟨⃗   α ◦ ⃗s, ⃗s⟩ = ⟨⃗
+                                        α, ⃗s⟩ to express binarity as an inner-product-
+shaped constraint over Rq . This makes binarity provable by the same log N -
+round split-and-fold engine used for evaluation, commitment consistency, and
+the self-inner-product norm check, which keeps verifier work polylogarithmic
+in N and preserves composability.
+
+
+3.4   Putting Everything Together
+
+We combine the sub-proofs from Sections 3.2 and 3.3 into a single protocol.
+    All sub-proofs share the same log N -round split-and-fold recursion. In round
+i, the prover folds every active witness (and its commitment state) using the
+same verifier challenge. This reuse enforces that every sub-proof refers to the
+same folded main witness ⃗si+1 and, for each binary repetition, the same folded
+auxiliary witness ŝα,i+1 . Accordingly, the verifier can maintain one reduced claim
+per constraint family, and no additional cross-consistency checks are needed.
+    In each round i ∈ [1 : log N ], the prover sends the tuple
+
+                                      (cm)           (lin)      (qua)       (bin) t 
+                          πi := πi             , πi          , πi       , (πi          ) ,
+
+          (bin)
+where (πi )t denotes the t independent repetitions of the binary sub-proof
+                                                                           (j)
+(Section 3.3). In the final round, the prover sends πlog N = (⃗slog N , (ŝlog N )j∈[t] ).
+
+
+Statement-level checks. The verifier first checks 0 ≤ b ≤ β 2 . This check depends
+only on the statement and is independent of the transcript.
+
+
+                                                        14
+Verifier checks in round i = 1. The verifier checks:
+                                                           (cm) ?
+ 1. Commitment validity: AlogDN −1 · π1     = cm.  E
+                                              (lin)    ?
+ 2. Linear claim (expose v): ct ⃗alog N −1 , π1        = v.
+                                                            (qua)                      (1)        (2)
+ 3. Quadratic claim (expose b): for π1                                = (L1 , M1 , M1 , R1 ), check
+                      ?
+    ct(L1 + R1 ) ≡ b (mod q).
+ 4. Binary sub-proof: For each        D repetition, check:E
+                 (cm,α)                                 (lin ,α)
+    Blog N −1 · π1        = cmα , ct α   ⃗ log N −1 , ⃗π1 1          = vα ,
+      D                          E           D                          E
+                        (lin2 ,α)                                (lin3 ,α)
+    ct ⃗rα,log N −1 , ⃗π1            = vrα , ct ⃗rlog N −1 , ⃗π1              = vr ,
+                (α)       (α)
+    and ct(L1         + R1 ) = vα
+                                                                               (cm)
+ Verifier checks in rounds i ∈ [2 : log N − 1]. Write πi                               = (cmi,L , cmi,R ) and
+⃗ci−1 = (ci−1,0 , ci−1,1 ). The verifier checks:
+ 1. Commitment consistency:
+                 (cm) ?                           (cm)
+    Alog N −i · πi    = cDi−1,0 Gσ,κ ci−1,1E GDσ,κ · πi−1 .E
+                                     (lin)   ?         (lin)
+ 2. Linear recursion: ⃗alog N −i , πi       = ⃗ci−1 , πi−1 .
+                                               (qua)
+ 3. Quadratic recursion: define ⃗ci−1 to be
+                                                                                             
+       ci−1,0 σ−1 (ci−1,0 ), ci−1,0 σ−1 (ci−1,1 ), ci−1,1 σ−1 (ci−1,0 ), ci−1,1 σ−1 (ci−1,1 ) ,
+                                                                         D               E
+                      (qua)              (1)    (2)                  ?     (qua)   (qua)
+    and check, for πi         = (Li , Mi , Mi , Ri ), Li + Ri = ⃗ci−1 , πi−1 .
+ 4. Binary recursion: for each repetition, run the analogous round-i checks
+    from Section 3.3 using the same folding challenge ⃗ci−1 .
+
+Final round i = log N . The prover sends the final folded openings ⃗slog N and,
+for each repetition, ŝα,log N . The verifier checks (omitting the explicit repetition
+bookkeeping):
+ 1. Norm admissibility: ∥⃗slog N ∥ ≤ γ and ∥ŝα,log N ∥ ≤ γα .
+ 2. Base commitment opening:
+                  ?                                  (cm)
+    A0 · ⃗slog N = clog N −1,0 Gσ,κ clog N −1,1 Gσ,κ · πlog N −1 .
+ 3. Auxiliary base opening (binary proof ):
+                    ?                                 (cm,α)
+    B0 · ŝα,log N = clog N −1,0 Gσ,κ clog N −1,1 Gσ,κ · πlog N −1 .
+                                                 ?                     (lin)
+ 4. Final linear check: ⟨⃗a0 ,⃗slog N ⟩ = ⟨⃗clog N −1 , πlog N −1 ⟩.
+                                                                  ?                    (lin ,α)
+                                α0 ,⃗slog N ⟩ = ⟨⃗clog N −1 , πlog 1N −1 ⟩,
+ 5. Final binary linear check: ⟨⃗
+                                   ?                   (lin ,α)
+    ⟨⃗rα,0 , Gσα ,2ℓ · ŝα,log N ⟩ = ⟨⃗clog N −1 , πlog 2N −1 ⟩,
+                          ?                (lin ,α)
+    and ⟨⃗r0 ,⃗slog N ⟩ = ⟨⃗clog N −1 , πlog 3N −1 ⟩
+                                                                       ?       (qua)         (qua)
+ 6. Final quadratic check: ⟨⃗slog N , σ−1 (⃗slog N )⟩ = ⟨⃗clog N −1 , πlog N −1 ⟩.
+ 7. Final binary quadratic check:
+                                         ?    (qua)       (qua,α)
+    ⟨Gσα ,2ℓ ŝα,log N , σ−1 (⃗slog N )⟩ = ⟨⃗clog N −1 , πlog N −1 ⟩.
+   Figure 2 presents the complete protocol. The decomposition and admissibility
+parameters are discussed in Section 3.6.
+
+
+                                                      15
+cm = Com(⃗s), v, b, β ∈ Zq . (⃗ai ∈ Zbqi )i∈[log N ] , (bi = 2)i∈[1,log N ] , b0 = 2ℓd.
+                                     ni+1 ·κι
+Private Inputs: ⃗s ∈ RN ℓ
+                      q , (cmin,i ∈ Rq        )i∈[log N −1] , ni+1 = N/2i+1 .
+P                                                               V
+                                                                Check 0 ≤ b ≤ β 2 .
+                                            (α(j) )j∈[t]        Sample (α(j) )j∈[t] ← Zq .
+                                                                            (j)
+                                                                Construct α
+                                                                          ⃗ :
+                                                                Nlog N −1 i
+                                                                  i=0    α
+                                                                         ⃗i = α ⃗
+                 (j)
+Construct ⃗sα
+        (j)
+with ⃗sα = α    ⃗ (j) ◦ ⃗s.
+  (j)
+vα = ⟨⃗     (j)
+          α , ⃗s⟩,                       (cm(j)  (j)
+                                            α , vα )j∈[t]
+  (j)                 (j)
+ŝα = G−1  σα ,N ℓ (⃗
+                    sα ),
+    (j)             (j)
+cmα = Com(ŝα ).
+                                                                Sample r(j) ← Zq .
+                                                                             (j)   (j)
+                                             (r(j) )j∈[t]       Construct ⃗ri , ⃗rα,i :
+                                                                Nlog N −1 (j)
+                                                                          ⃗ri = ⃗r(j) ,
+                                                                Ni=0
+                                                                  log N −1 (j)
+                                                                  i=0     ⃗rα,i = ⃗r(j) ◦ α
+                                                                                          ⃗ (j) .
+ (j)     (j) Nlog N −1 (j)
+vr = ⟨⃗sα , i=0        ⃗r ⟩.              (vr(j) , vr(j) )                (j) ?   (j)
+ (j)      Nlog N −1 (j)i                              α j∈[t]   Check vr = vrα .
+vrα = ⟨⃗s, i=0      ⃗rα,i ⟩.
+ Compute:
+  (cm)    (lin)
+⃗π1 , ⃗π1 ,
+  (qua)
+⃗π1 , (⃗π1
+             (bin,j)
+                     )j∈[t] .                    ⃗π1
+          (cm)      (lin)     (qua)
+⃗π1 = (⃗π1 , ⃗π1 , ⃗π1 ,
+         (bin,j)
+      (⃗π1        )j∈[t] ).
+                                                  ⃗c1           Run Verify(π1 ).
+                                                                Sample ⃗c1 ← C 2 .
+ Update:
+⃗s2 = c1,0⃗sL + c1,1⃗sR ,                        ⃗π2
+   (j)
+ ŝα,2 = c1,0 ŝα,L + c1,1 ŝα,R ,
+ Compute: ⃗π2 .
+                                                  ⃗c2           Run Verify(π1 , π2 ).
+                                                                Sample ⃗c2 ← C 2 .
+                   (j)                       Iterate
+Update: ⃗s3 , ŝα,3
+                                                                ···
+···                                     log N − 1 rounds
+                         (j)             ⃗slog N , ŝα,log N    Run Verify πk ),
+Update: ⃗slog N , ŝα,log N
+                                                                k ∈ [1, log N + 1].
+
+                               Fig. 2. Core Protocol for Proving Rmain
+
+
+                                                   16
+                                 
+   Verify (πk )k∈[1,i+1]
+
+    1:   If i = 1, check:
+                                                                      
+                         (cm)       ?                          (cm,α,j)      ?
+         Alog N −1 · π1            = cm, Blog N −1 · π1                      = cm(j)  α ,
+                                                                            
+                            (lin)     ?               (j)         (lin ,α,j)       ?
+         ct ⟨⃗alog N −1 , π1 ⟩ = v, ct ⟨⃗rlog N −1 , π1 1                    ⟩ = vr(j) ,
+                                                                                         
+               (j)             (lin ,α,j)    ?                   (j)           (lin3 ,α,j)    ?
+         ct ⟨⃗rα,log N −1 , π1 2          ⟩ = vr(j)
+                                                 α
+                                                    ,     ct  ⟨⃗
+                                                               α log N −1  , π 1           ⟩  = vα(j) ,
+                                                                                   
+                               (qua)      ?                             (qua,α,j)        ?
+         ct ⟨(1, 0, 0, 1), π1 ⟩ = b, ct ⟨(1, 0, 0, 1), π1                           ⟩ = vα(j) .
+    2:   If i ∈ {2, 3, . . . , log N − 1}, check:
+                         (cm)  ?                         (cm)
+         Alog N −i · πi          = ci−1,0 Gσ,κ ci−1,1 Gσ,κ · πi−1
+                              (lin)     ?                  (lin)
+         ⟨⃗alog N −i , πi             ⟩ = ⟨⃗ci−1 , πi−1 ⟩.
+                                (qua) ?            (qua)       (qua)
+         (1, 0, 0, 1) · πi  = ⟨⃗ci−1 , πi−1 ⟩.
+                      (cm,α,j)  ?                        (cm,α,j)
+         Blog N −i · πi          = ci−1,0 Gσ,κ ci−1,1 Gσ,κ · πi−1    .
+           (j)                (lin1 ,α,j)      ?                   (lin ,α,j)
+         ⟨⃗rlog N −i , πi                    ⟩ = ⟨⃗ci−1 , πi−11                 ⟩.
+           (j)                  (lin2 ,α,j)        ?                 (lin ,α,j)
+         ⟨⃗rα,log N −i , πi                    ⟩ = ⟨⃗ci−1 , πi−12                    ⟩.
+            (j)               (lin3 ,α,j)      ?                   (lin ,α,j)
+         ⟨⃗
+          αlog N −i , πi                     ⟩ = ⟨⃗ci−1 , πi−13                 ⟩.
+                         (qua,α,j) ?    (qua)  (qua,α,j)
+         (1, 0, 0, 1) · πi         = ⟨⃗ci−1 , πi−1       ⟩.
+    3:   If i = log N , check:
+                                       (j)
+         ∥⃗slog N ∥ ≤ γ, ∥ŝlog N,α ∥ ≤ γα ,
+                                                                                                (cm)
+         A0 · ⃗slog N = [clog N −1,0 Gσ,κ , clog N −1,1 Gσ,κ ] · πlog N −1 ,
+                  (j)                                                                             (cm,α,j)
+         B0 · ŝα,log N = [clog N −1,0 Gσ,κ , clog N −1,1 Gσ,κ ] · πlog N −1 ,
+                                                       (lin)
+         ⟨⃗a0 ,⃗slog N ⟩ = ⟨⃗clog N −1 , πlog N −1 ⟩,
+           (j)     (j)                                        (lin ,α,j)
+         ⟨⃗r0 , ŝα,log N ⟩ = ⟨⃗clog N −1 , πlog 1N −1 ⟩,
+           (j)                                              (lin ,α,j)
+         ⟨⃗rα,0 ,⃗slog N ⟩ = ⟨⃗clog N −1 , πlog 2N −1 ⟩,
+            (j)                                             (lin ,α,j)
+          α0 ,⃗slog N ⟩ = ⟨⃗clog N −1 , πlog 3N −1 ⟩,
+         ⟨⃗
+                                                       (qua)             (qua)
+         ⟨⃗slog N , σ−1 (⃗slog N )⟩ = ⟨⃗clog N −1 , πlog N −1 ⟩,
+                        (j)                                             (qua)             (qua,α,j)
+         ⟨Gσα ,2ℓ ŝα,log N , σ−1 (⃗slog N )⟩ = ⟨⃗clog N −1 , πlog N −1 ⟩.
+
+Fig. 3. Verification Algorithm for The Core Protocol for Proving Rmain (at each round,
+it checks t repeated binary proofs (for each j ∈ [t]))
+
+
+
+
+                                                                   17
+3.5     Security Analysis
+We analyze the interactive protocol in Fig. 2 for proving Rmain . Completeness is
+perfect. Soundness follows from round-by-round, coordinate-wise special sound-
+ness of the shared split-and-fold recursion, plus the independent error from the
+randomized binary check repeated t times.
+Theorem 1 (Completeness). Let the challenge space C ⊂ Rq consist of ring
+elements whose ℓ2 -norms are bounded by τ and whose ℓ∞ -operator norm is
+bounded by T . Define the per-round ℓ∞ bounds
+                                                                   σα
+              γlog N := (2T )log N −1       and    γα,log N :=        · (2T )log N −1 .
+                                                                    2
+Define the final ℓ2 admissibility bounds
+                     √                    p
+               γ := 2ℓd · γlog N and γα := 2ℓ ια d · γα,log N .
+
+Fig. 2’s protocol for proving the relation Rmain achieves perfect completeness.
+Proof. An honest prover follows the protocol and the verifier accepts with prob-
+ability 1. It suffices to show that the final openings sent in round log N satisfy
+the stated norm bounds.
+    For i ∈ [1 : log N − 1], let ⃗si+1 = ci,0⃗si,L + ci,1⃗si,R be the folded witness.
+Define ŝα,i+1 analogously for the auxiliary witness in the binary sub-proof. Let
+γi and γα,i be such that ∥⃗si ∥∞ ≤ γi and ∥ŝα,i ∥∞ ≤ γα,i .
+    Using the operator-norm bound ∥cv∥∞ ≤ ∥c∥op,∞ ∥v∥∞ ≤ T ∥v∥∞ for all
+c ∈ C, we obtain
+
+                  ∥⃗si+1 ∥∞ ≤ ∥ci,0⃗si,L ∥∞ + ∥ci,1⃗si,R ∥∞
+                              ≤ ∥ci,0 ∥op,∞ ∥⃗si,L ∥∞ + ∥ci,1 ∥op,∞ ∥⃗si,R ∥∞
+                              ≤ 2T · γi .
+
+Thus, γi+1 := 2T ·γi is a valid bound. The same argument gives γα,i+1 := 2T ·γα,i .
+   For the initial witnesses, we use γ1 = 1 (binary coefficients) and γα,1 = σα /2
+(base-σα decomposition). By induction over the log N −1 folding steps, we obtain
+
+                  ∥⃗slog N ∥∞ ≤ γlog N       and       ∥ŝα,log N ∥∞ ≤ γα,log N .
+
+      Finally, ⃗slog N ∈ R2ℓ q and ŝα,log N ∈ Rq
+                                                 2ℓια
+                                                      , so
+                                  √                      √
+                     ∥⃗slog N ∥2 ≤ 2ℓd · ∥⃗slog N ∥∞ ≤ 2ℓd · γlog N = γ,
+
+and                           p                              p
+            ∥ŝα,log N ∥2 ≤       2ℓια d · ∥ŝα,log N ∥∞ ≤       2ℓια d · γα,log N = γα .   ⊔
+                                                                                            ⊓
+Theorem 2 (Coordinate-wise Special Soundness). Assume that the M-SIS
+problem is hard for rank κ and norm bound
+                          √              p               
+                  max N · N ℓ γlog N , N · N ℓ ια γα,log N ,
+
+
+                                                  18
+where γlog N and γα,log N are as in Theorem 1.
+   Then Fig. 2 achieves 2-coordinate-wise 2-special soundness with additional
+                                  t
+soundness error 4 log
+                   |C|
+                       N
+                         +   2N ℓd
+                               q      , where the second term is the error from the
+                                                                    
+                                                             λ
+randomized binary check repeated t times, and t      :=               .
+                                                       log q/(2N ℓd)
+
+
+      The formal proof of Theorem 2 is given in Appendix C.
+
+Theorem 3 (Knowledge Soundness). Fig. 2 for proving Rmain is knowledge-
+                                                                     t
+sound with total knowledge soundness error bounded by 6 log
+                                                         |C|
+                                                             N
+                                                               + 2Nqℓd .
+
+Proof. By Lemma 3 and Theorem 2, Fig. 2 satisfies 2-coordinate-wise 2-special
+                                                t
+soundness with additional error 4 log N
+                                   |C| +
+                                           2N ℓd
+                                             q      . Applying the union bound as
+                                                                             t
+in Lemma 3 yields a total failure probability bounded by 6 log|C|
+                                                                  N
+                                                                    +   2N ℓd
+                                                                          q      . ⊔
+                                                                                   ⊓
+
+
+3.6     Parameter Selection and Efficiency Analysis
+
+Parameter Selection. We group parameters by their roles in the core protocol.
+
+ – Decomposition parameters. These parameters influence concrete effi-
+   ciency and admissibility. They are the gadget-decomposition bases (σ, ι) for
+   inner commitments, and (σα , ια ) for the potentially larger-norm vector ⃗sα .
+ – Hardness parameters. These parameters determine the hardness of M-SIS.
+   They are the rank κ, the prime modulus q, the ring dimension d, and the
+   M-SIS norm bound βM-SIS required by the reduction (cf. (4)).
+ – Challenges. These parameters control soundness and completeness of fold-
+   ing. They are the challenge space C, its size |C|, and bounds (τ, T ) on the
+   ℓ2 -norm and ℓ∞ -operator norm of its elements.
+
+    We next state the constraints induced by correctness and security, and then
+give asymptotic choices that satisfy them.
+
+Decomposition.
+              For a decomposition base σ ≥ 2, recall ι = ⌈logσ q⌉ and ια =
+ logσα q . Smaller ι and ια reduce the number of decomposed components, while
+larger bases increase the magnitude of decomposition digits (and thus affect
+admissibility bounds such as γα ). In our asymptotic summary (Table 2), we
+treat ι and ια as O(1) by choosing σ and σα as fixed powers of q, but the
+concrete instantiation follows the same tradeoff.
+
+M-SIS hardness constraint. Let βM-SIS denote the Euclidean norm bound for the
+M-SIS instance produced by the reduction. By Theorem 2, it must satisfy
+                             √               p              
+              βM-SIS ≥ max N N ℓ γlog N , N N ℓ ια γα,log N ,             (4)
+
+
+                                        19
+where γlog N and γα,log N are the folded-witness bounds from Theorem 1. Security
+requires that M-SIS is hard for the chosen (d, κ, q) at norm βM-SIS .
+   According to the heuristic methodology of [35], an M-SIS instance over a ring
+with element degree d and Euclidean bound βM-SIS is hard when
+                                        √                 
+                         βM-SIS ≤ min 2 2 d log q log δ , q ,
+
+where δ is the root-Hermite factor. Following [6], it can be expressed as
+                                                       1/(2(bk −1))
+                                       bk (πbk )1/bk
+                                   
+                              δ=                                       ,
+                                           2πe
+
+for a BKZ block size bk = O(λ).
+                                                                      2
+    Rearranging the above inequality yields d log q > (log4 βlog
+                                                               M-SIS )
+                                                                 δ      .
+    Furthermore, observing log βM-SIS = O(log N + log ℓ), and using
+
+                               bk (πbk )1/bk
+                                                       
+                   1                                log λ
+       log δ =           log                   =Θ             for bk = O(λ),
+               2(bk − 1)            2πe               λ
+we will set log ℓ = log log q < log N in the following instantiation. We obtain
+
+                                            λ · log2 N
+                                                      
+                              d log q = O                ,
+                                               log λ
+which corresponds to the asymptotic bit-length of a ring element in our setting.
+                                        2
+    Set d = Θ(λ), we get log q = O( log   N
+                                     log λ ). Since N = poly(λ) under the default
+setting, choosing q accordingly also ensures q = poly(λ), consistent with the
+default parameters.
+
+Binary-check error and repetitions. Each randomized binary check contributes
+soundness error at most 2N
+                         ℓd/q (Section
+                                      3.3). Repeating it t times yields error
+(2N ℓd/q)t , so we set t :=           , which ensures (2N ℓd/q)t ≤ 2−λ as long
+                                        λ
+                               log q/(2N ℓd)
+                                    2                    l         m           
+as q > 2N ℓd. Noting that log q = O log  N
+                                     log λ , we obtain t =   λ·log λ
+                                                                2
+                                                             log N
+                                                                       = Θ     λ
+                                                                             log λ ,
+and hence t · log q = O(λ).
+
+Challenge space. Recall that C ⊂ Rq must satisfy: (i) for all distinct c, c′ ∈ C,
+the difference c − c′ is invertible in Rq ; (ii) ∥c∥ ≤ τ and ∥c∥op,∞ ≤ T for all c ∈ C.
+A concrete way to satisfy (i) is to choose C from a pool of short ring elements
+whose pairwise differences remain short, and then invoke Lemma 1.
+    Concretely, fix integers w0 , w1 and w2 ∈ [d] consider the pool Pw0 ,w1 ,w2 :
+n                                                                                    o
+  c ∈ Rq    coef(c) ∈ {0, ±1, ±2} ∧ ∀i ∈ {0, 1, 2} : #{j : |coef(c)j | = i} = wi .
+
+For any distinct c, c′ ∈ Pw , the difference c − c′ has the norm at most 2(w1 +
+w2 ) nonzero coefficients, each in {0, ±1, ±2, ±3, ±4}, hence 0 < ∥c − c′ ∥2 ≤
+
+
+                                                20
+Table 2. Notations with asymptotic parameters (with size parameter N instantiated
+with N · d = L in our PCS setting)
+
+    Notation                    Explanation               Instantiation
+                                                                    2 
+          q            Prime modulus, q ≡ 5 mod 8       log q = O log    N
+                                                                     log λ
+          d                     Ring dimension                  Θ(λ)
+          κ                 Height of matrices Ai               O(1)
+       τ or T           ℓ2 - or operator-norm bound             O(1)
+          C                     Challenge space               |C| ≈ 2λ
+      (σ, σα )               Decomposition basis            O(q 1/O(1) )
+       (ι, ια )              Decomposition pieces               O(1)      
+ (γlog N , γα,log N )        Infinity norm bound          O q 1/O(1) · N
+           t          Repetition times for binary check t · log q = O(λ)
+ √                                                           √                p
+4 2w1 + 2w2 . Thus, if q is a prime with q ≡ 5 mod 8 and 4 2w1 + 2w2 < q/2
+(equivalently, q > 64(w1 + w2 )), then every nonzero difference c − c′ is invertible
+in Rq by Lemma 1, and condition    √ (i) holds for any subset C ⊆ Pw√  . Moreover,
+for all c ∈ Pw we have ∥c∥2 ≤ w1 + 2w2 , so we may take τ := w1 + 2w2 .
+Also, using ∥cv∥∞ ≤ ∥c∥1 · ∥v∥∞ for polynomial multiplication in Rq , we have
+∥c∥op,∞ ≤ ∥c∥1 = w1 + 2w2 , so we may take T := w1 + 2w2 . Finally, since
+|Pw | = wd1 · d−w
+                     w +w
+                w2
+                   1
+                      · 2 1 2 , we can choose w so that |Pw | ≥ 2λ and then select
+any subset C ⊆ Pw of size |C| ≈ 2λ . Table 2 summarizes the notation and the
+resulting asymptotic parameter choices.
+
+Efficiency. We now estimate proof size and computation cost under the above
+choices. We measure proof size in bits by representing each ring element in Rq
+via its d coefficients in Zq , i.e., d log q bits.
+
+Proof Size. For rounds i ∈ [1 : log N − 1], message πi contains: 2κι ring elements
+     (cm)                         (lin)                      (qua)
+for πi , 2 ring elements for πi , 4 ring elements for πi           , and
+                                                                       (2κι + 10)
+ring elements per binary repetition (cf. Section 3.3). Thus, |πi | = (2κι + 6) + t ·
+          
+(2κι + 10) · d log q. In the final round, the prover also sends ⃗slog N ∈ R2ℓ
+                                                                           q and (for
+each repetition) ŝα,log N ∈ R2ℓι
+                               q
+                                  α
+                                    , so |πlog N | = (2ℓ + 2tℓια ) · d log q. Therefore, the
+                                   Plog N −1                                     
+total proof size is bounded by i=1             |πi | + |πlog N | = O log N + ℓ · (2κι +
+               
+10) · t d log q . Using the asymptotic parameters from Table 2 and the fact that
+                                                                          
+t · log q = O(λ), the total size is bounded by O (log N + ℓ) · λ2 bits.
+
+Prover Cost. In round i ∈ [1 : log N ], the prover updates folded witnesses of
+lengths N ℓ/2i−1 and (per binary repetition) N ℓια /2i−1 . Each of the commit-
+ment, linear, and quadratic sub-proofs performs a constant number of ring opera-
+tions per witness coordinate and per stored intermediate commitment. Summing 
+over rounds yields a geometric series, giving total prover cost of O ℓN + tℓN =
+O(tℓN ) ring operations, up to constant factors depending on κ, ι and ια .
+
+
+                                            21
+              Table 3. Asymptotic Efficiency in terms of N , t, λ, and ℓ
+
+             Proof Size                   Prover Cost                    Verification Cost
+              (in bits)                (in ring operations)              (in ring operations)
+         O((ℓ + log N ) · λ2 )                   O(tℓN )                O((t + 1) log N + tℓ)
+
+
+Verifier Cost. Per round, the verifier performs a constant number of checks for
+(cm), (lin), and (qua), plus t copies of the binary checks, hence O(t + 1) ring
+operations per round. Over log N − 1 rounds, this contributes O((t + 1) log N )
+ring operations. In the final round, the verifier additionally processes t+1 vectors
+of length Θ(ℓ), contributing O(tℓ) ring operations.
+    The verifier also constructs tensor-decomposed exponent vectors. Using the
+decomposition from Section 3.3, for each repetition, it constructs base vectors
+of length 2ℓd (namely α      ⃗ 0 , ⃗r0 , and ⃗rα,0 ), and then log N many length-2 vectors
+(namely α ⃗ i , ⃗ri , and ⃗rα,i for i ≥ 1) via repeated squaring. Thus, across trepe-
+titions, the total cost for challenge-vector construction is O t(ℓd + log N ) field
+operations over Zq .                                                                     
+    Putting everything together, the total       verification cost is O (t+1) log N +tℓ
+ring operations, plus O t(ℓd + log N ) field operations for challenge-vector con-
+struction. Noting that one ring operation corresponds to O(d log d) field opera-
+tions, the total verification cost can be expressed, in unified ring-operation units,
+as O (t + 1) log N + tℓ .
+    Table 3 summarizes the asymptotic efficiency of the scheme.
+
+4    Polynomial Commitment Scheme from Serval
+We instantiate the protocol in Fig. 2 to construct PCSs for univariate and mul-
+tilinear polynomials over Zq . We need to address the following tasks.
+ – Adapt polynomials over Zq to the ring setting Rq .
+ – Reduce univariate and multilinear evaluation constraints to linear constraints
+   in Rmain .
+ – Decompose large-norm coefficient vectors into small-norm witnesses compat-
+   ible with the lattice setting.
+
+Integer-to-Ring Mapping. Let f⃗ ∈ ZN      q
+                                            d
+                                              be a coefficient vector. We map f⃗
+to a ring vector ⃗f ∈ Rq by packing every d consecutive coefficients into one ring
+                       N
+
+element. Concretely,
+                    d−1
+                   X                d−1
+                                     X                          d−1
+                                                                X                   
+            ⃗f =          fi X i ,         fi+d X i , . . . ,         f(N −1)d+i X i ∈ RN
+                                                                                        q .
+                    i=0              i=0                        i=0
+
+
+Evaluation Constraint Reduction. We show that evaluation constraints re-
+duce to linear constraints of the form in Rmain .
+
+
+                                                      22
+Univariate. Let f be a univariate polynomial with coefficient vector f⃗ ∈ ZN               d
+                                                                                         q . For
+                                                                           PN d−1
+an evaluation point uuni ∈ Zq , the evaluation constraint is i=0 fi · uiuni = v.
+Equivalently, ⟨f⃗, ⃗uuni ⟩ = v, ⃗uuni := (1, uuni , . . . , uN  d−1
+                                                              uni   ) ∈ ZN    d
+                                                                           q . Since N and d
+                                                                                 Nlog N −1
+are powers of two, ⃗uuni admits the tensor decomposition ⃗uuni = i=0                       ⃗uuni,i ,
+                                                                          2i d
+where ⃗uuni,0 := (1, uuni , . . . , u2d−1
+                                       uni ) ∈   Z 2d
+                                                   q  , ⃗
+                                                        u uni,i  :=  (1, uuni  ) ∈ Z2
+                                                                                    q , for  i =
+{1, 2, . . . , log N − 1}. So, the evaluation constraint becomes
+                                                   logON −1
+                                        *                          +
+                         ⟨f⃗, ⃗uuni ⟩ = coef(⃗f ),          ⃗uuni,i = v,
+                                                      i=0
+
+which matches the linear constraint form in Rmain .
+
+Multilinear. Let f be a multilinear polynomial over log(N d) variables with co-
+                                                                                    log(N d)
+efficient vector f⃗ ∈ ZN   d
+                         q . For an evaluation point (u0 , . . . , ulog(N d)−1 ) ∈ Zq        ,
+                                                  Nlog(N d)−1                Nd
+define the standard MLE vector ⃗umul          :=     j=0        (1, uj ) ∈ Zq . Then the
+evaluation constraint is ⟨f⃗, ⃗umul ⟩ = v. We regroup ⃗umul into log N tensor factors
+                               Nlog(2d)−1
+as follows. Let ⃗umul,0 :=      j=0       (1, uj ) ∈ Z2d
+                                                       q , ⃗umul,i := (1, ulog(2d)+i−1 ) ∈
+                                              Nlog N −1
+  2
+Zq for i ∈ [1 : log N ]. Then ⃗umul =            i=0     ⃗umul,i , and hence ⟨f⃗, ⃗umul ⟩ =
+D                            E
+             log N −1
+ coef(⃗f ), i=0
+           N
+                      ⃗umul,i = v, which matches the linear constraint form in Rmain .
+
+
+Large-Norm Decomposition. To fit the lattice setting, we decompose ⃗f into
+a small-norm binary witness. Let ℓ := ⌈log q⌉. We apply base-2 decomposition
+coefficient-wise (modulo q) and obtain a witness vector ⃗s ∈ RN        q
+                                                                         ℓ
+                                                                            such that
+                   N ℓd
+coef(⃗s) ∈ {0, 1}       and ∥⃗s∥∞ ≤ 1. Under
+                                         √      our  norm  definition,   this  implies
+∥⃗s∥22 ≤ N ℓd, and hence ∥⃗s∥2 ≤ β := N ℓd. Accordingly, the evaluation con-
+straint for ⃗f can be replaced by an equivalent constraint over ⃗s by absorbing the
+base-2 weights into the first tensor factor. We thus replace ⃗uuni,0 (resp. ⃗umul,0 ) by
+⃗uuni,0 ⊗(1, 2, 22 , . . . , 2ℓ−1 ) ∈ Z2dℓ
+                                       q       (resp. ⃗umul,0 ⊗(1, 2, 22 , . . . , 2ℓ−1 ) ∈ Z2dℓ
+                                                                                             q ).
+
+This yields a linear constraint on coef(⃗s) of the form required by Rmain with
+b0 = 2ℓd and bi = 2 for all i ∈ [1 : log N ].
+   We can now invoke the protocol in Fig. 2 to prove knowledge of the decom-
+posed witness ⃗s and the claimed evaluation value.
+   The complete polynomial commitment scheme is in Fig. 4. We provide the
+batching support in Appendix E.
+Theorem 4. The PCS in Fig. 4 satisfies evaluation completeness, weak binding,
+and knowledge soundness.
+Proof. Theorem 1 establishes evaluation completeness, Theorem 2 guarantees
+(weak) binding, and Theorem 3 ensures knowledge soundness.              ⊔
+                                                                        ⊓
+   The protocol can be made zero-knowledge by hiding the ℓ2 -norm of the wit-
+ness and proving it using standard techniques such as range proofs.
+
+
+                                                23
+       Public Inputs:
+       pp = ((Ai , Bi ∈ Rκ×2κι
+                         q     )i∈[1,log N ] ,
+       A0 ∈ Rκ×2⌈log
+             q
+                     q⌉
+                        , B0 ∈ Rκ×2⌈log
+                                q
+                                        q⌉ι
+                                            ).
+
+       Private Inputs:
+       f ∈ Z<N
+            q
+               d
+                 [X] or f ∈ Zq [X0 , . . . , Xlog (N d)−1 ].
+
+       Commit (pp, f ) → (cm, st)
+
+       Represent f as f⃗ = (f0 , . . . , fN d−1 ).
+                         d−1
+                         X
+       Compute fi =            fid+j X j , i ∈ [N ].
+                         j=0
+
+       Let ⃗f = (f0 , . . . , fN −1 ) ∈ RN
+                                         q .
+                                                  ·⌈log q⌉
+       Employ unsigned base-2 on f to get ⃗s ∈ RN
+                                                q          .
+       Compute (cm, st) = Com(⃗s).
+       Return (cm, st).
+
+       Open (pp, cm, f, st) → {0, 1}
+
+       Represent f as f⃗.
+       Construct ⃗f = (f0 , . . . , fN −1 ).
+       Employ unsigned base-2 on f to get ⃗s.
+       Return 1 iff Com(⃗s) = (cm, st).
+
+       Eval(pp, cm, u (or ⃗u ∈ Zlog
+                                q
+                                    (N d)
+                                          ), v; (f, st))
+
+       Compute ⃗s based on f .
+       Construct (⃗uuni,i )i∈[log N ] (resp., (⃗umul,i )i∈[log N ] ).
+       Let ⃗ai = ⃗uuni,i (resp. ⃗umul,i ) for i ∈ [log N ]).
+       Run the protocol in Fig. 2 to prove ((cm, β, v, b, (⃗ai )i∈[log N ] );⃗s).
+
+                          Fig. 4. PCS constructed from Fig. 2
+
+
+Theorem 5. Using the parameters in Table 2 with ℓ = O(log q), the PCS de-
+picted in Fig. 4 achieves the following efficiency:
+
+ – Proof Size: O λ2 · log2 N bits;
+                            
+
+ – Prover Cost: O(N · λ) ring operations;
+ – Verification Cost: O(log N · poly(λ)) ring operations.
+
+
+                                               24
+Proof. The
+          bounds
+                follow directly from Table 3. Substituting ℓ = O(log q) and
+            log2 N
+log q = Θ    log λ   yields the claimed bound on the proof size. The prover and
+verification costs follow by the relation t · log q = O(λ) and t = Θ( logλ λ ).    ⊔
+                                                                                   ⊓
+
+
+5     Optimization and Implementation
+
+5.1   Proof Compaction
+
+We present an optional optimization of Fig. 2 that reduces concrete proof size by
+aggregating the verifier’s checks. The starting point is structural: Fig. 3 consists
+almost entirely of dot-product–shaped constraints over Rq (and a small number
+of linear-map consistency checks), and our protocol already supplies the tensor
+and decomposition machinery needed to express them uniformly. We therefore
+aggregate all per-round verification constraints into a single LaBRADOR in-
+stance [9], yielding a proof-of-proof.
+    This optimization enforces two requirements. First, the log N -round split-
+and-fold phase must be non-interactive so that the full set of checks is fixed before
+aggregation. Second, each verifier check must be written in the LaBRADOR
+relation format (quadratic dot products plus linear terms).
+
+
+Fiat–Shamir transform. We apply Fiat–Shamir to the recursive phase after
+the prover sends (vr , vrα ). The prover derives each folding challenge ⃗ci ∈ C 2 as
+a deterministic function of the transcript prefix up to round i − 1. We include
+the round index and a domain separator in the hash input to avoid cross-round
+collisions. To ensure that ⃗ci ∈ C 2 (satisfying invertibility and coefficient/norm
+constraints), we design the challenge-generation algorithm shown in Algorithm 1,
+which enforces these requirements.
+     In our instantiation, C ⊂ Rq consists of ring elements with coefficients in
+{0, ±1, ±2} and an ℓ∞ -operator norm bounded by T . Let Com(tri−1 ) denote the
+Ajtai commitment to the transcript prefix up to round i − 1, i.e., Com(tri−1 ) =
+                   (j)                     
+Com pp, cm, (cmα )j∈[t] , π1 , . . . , πi−1 .
+     We claim that all challenges generated by Algorithm 1 belong to C 2 , satisfying
+invertibility and holding an acceptable ℓ∞ operator norm.
+     Invertibility is ensured by the choice of a suitable q in our main parameter
+setting. For the operator-norm condition, it can be proved that ∥c∥op,∞ = ∥c∥1 .
+Specifically, by Young’s inequality for negacyclic convolution, multiplication by c
+satisfies ∥cv∥∞ ≤ ∥c∥1 · ∥v∥∞ , and therefore ∥c∥op,∞ = ∥c∥1 .
+     In our concrete instantiation (Section 5.2), we set the operator-norm bound
+T = 48, and all challenge elements output by Algorithm 1 satisfy ∥c∥1 = 32 +
+8 · 2 = 48, thereby fulfilling the operator-norm requirement.
+     Consequently, the verifier can reconstruct the same ⃗ci from the committed
+prefix without repeating rejection sampling, guaranteeing that the check is per-
+formed with the identical challenge.
+
+
+                                          25
+Algorithm 1 Folding Challenge Generation in FS
+ 1:    µi ← H(Com(tri−1 )); ρi ← PRG(µi );
+ 2:    for j ∈ {0, 1} do
+ 3:      A ← [0, . . . , 0, 1, . . . , 1, 2, . . . , 2];    // the absolute-value multiset
+              | {z } | {z } | {z }
+                      24          32           8
+
+ 4:      for k = d − 1 → 1 do               // Fisher–Yates shuffle using bits from ρi
+ 5:         x ← next bits from ρi interpreted as an integer in [0, k];
+ 6:         swap A[k] ↔ A[x];
+ 7:      endfor
+ 8:      for k = 0 → d − 1 do               // assign random signs
+ 9:         if A[k] = 0 then ci,j,k ← 0; else s ← next bit from ρi ;
+10 :        ci,j,k ← A[k] · (−1)s ;
+11 :     endfor
+                   d−1
+                   X
+12 :     ci,j ←          ci,j,k X k ∈ Rq ;
+                   k=0
+13 :   endfor
+14 :   return ⃗ci = (ci,0 , ci,1 );
+
+
+LaBRADOR Compaction. We now satisfy the second requirement by en-
+coding the verifier’s checks as a single LaBRADOR relation. Fix the (now non-
+interactive) proof transcript
+                                                   
+        π = πpre , πinter , (Com(tri ))i∈[1,log N ] , πinter = (π1 , . . . , πlog N ).
+
+Each round-i verification condition in Fig. 3 is one of the following types.
+(1) A dot product over Rq (e.g., linear recursion and the quadratic recursion
+written as a linear combination of (L, M(1) , M(2) , R)).
+(2) A linear-map consistency check A·x = y, which can be written as a set of dot-
+product constraints by expanding coordinates against standard basis vectors.
+(3) A final-round norm admissibility check, which we reduce to dot-product
+constraints by (i) proving a self inner product bound and (ii) enforcing a binary
+decomposition of the opened coefficients via Section 3.3.
+    We also need to enforce transcript-seed consistency: the committed seeds
+(Com(tri )) must match the transcript blocks used to derive Fiat–Shamir chal-
+lenges. Since Ajtai commitments are linear, these consistency checks are also
+linear constraints and therefore can be reduced to dot products.
+    Let W denote the concatenation of all witness blocks required to express the
+conjunction of the above constraints, after applying the same base decomposi-
+tions to any large-norm components that appear in πlog N . The prover produces a
+LaBRADOR proof πL attesting that W satisfies the resulting system of quadratic
+
+
+                                                       26
+dot-product constraints. The aggregated relation has the LaBRADOR form
+                     X                      X
+                         αi,j ⟨⃗zi ,⃗zj ⟩ +   ⟨⃗
+                                               φi ,⃗zi ⟩ − b = 0,
+                         i,j                 i
+
+
+where the blocks (⃗zi ) are slices of W and the coefficients (αi,j , φ
+                                                                     ⃗ i , b) are verifier-
+computable from public inputs and the transcript.
+    Let M be the total number of ring elements in W. Under this encoding,
+LaBRADOR yields a proof whose size is O(log log M ) ring elements [9]. In our
+setting, M is dominated by the per-round transcript blocks in πinter           and the
+decomposed final openings, and it grows as M = Θ (t + 1) · log N + Θ tℓ ·
+log γα + ℓ · log γ which is O(λ · log N ) under our PCS instantiation using the
+parameters from Table 2. The resulting      compact proof sent to the verifier is
+π = πpre , πL , (Com(tri ))i∈[1,log N ] .
+    This transformation moves security to the random oracle model (via Fiat–
+Shamir) while preserving the underlying module-SIS binding and extraction
+guarantees. We analyze the soundness of the optimized protocol in Appendix D.
+
+
+5.2   Implementation
+
+We provide a concrete instantiation and baseline benchmarks. We first state the
+parameters used in our prototype and then report timing and size measurements.
+
+
+Concrete Parameters. For security parameter λ = 128, we select parameters
+satisfying Table 2. We report communication in bytes under the resulting log q-
+bit encoding of ring elements, so that all concrete comparisons fix λ rather than
+hiding security dependence in asymptotics. We instantiate C as ring elements
+                                   32 in40{±1},124.0
+with 24 zero coefficients, 32 coefficients          and 8 coefficients in {±2}. The
+number of such challenges is 64 32  ·  8  · 2  ≈ 2     . We set d = 64 and T = 48;
+by construction, the challenge sampler ensures ∥c∥op,∞ ≤ ∥c∥1 = 48 (via Young’s
+inequality), so the required operator-norm bound holds.
+    Table 4 reports proof sizes as (i) the baseline protocol and (ii) an esti-
+mated post-compaction size under LaBRADOR-style aggregation. The post-
+compaction sizes are computed analytically from the proof-size formulas/tables
+of LaBRADOR [9] together with our log q-bit ring-element encoding, and are
+not included in the measured microbenchmarks.
+    If one restricts C further (e.g., by tightening the operator-norm target), the
+entropy of a single challenge decreases and can be compensated by repetition at
+the protocol level. Table 4 illustrates this tradeoff for larger degree bounds.
+
+
+Prototype and benchmarking setup. Our prototype is implemented on an
+Apple Silicon platform (M2, 16 GB unified memory). The implementation code
+and a subset of the raw experimental data are available at https://gitlab.c
+om/LatticePCSReview/servalPCS.
+
+
+                                            27
+    Table 4. Concrete parameter choices and proof sizes for polynomial length L = 2e
+
+                        KB (e ≤ 20)                          MB (e ≥ 22)
+e           15     16      17      18     19      20    22    24    26     28    30
+log q       88    100     108     120    128     128    84    94    104   114   124
+d           64     64      64      64     64      64    64    64     64    64    64
+κ           13     13      13      13     13      13    13    13     13    13    13
+ι            5      5       5       5      5       8     5     5      5     5     5
+Rawa 2.01 2.40 2.73 3.17 3.54 5.45 11.27 14.14 17.22 20.72 24.43
+Opt. 259.16 302.88 337.03 385.22 423.03 436.03 1.97 2.24 2.73 3.15 3.59
+a
+ Raw sizes are in MB.
+Optimized (Opt.) sizes are in KB for e ≤ 20 and in MB for e ≥ 22.
+
+
+
+    The current code covers the baseline interactive protocol in Fig. 2. We do
+not integrate LaBRADOR compaction in this prototype because the available
+LaBRADOR implementation4 is not yet stable enough on our platform.
+    We benchmark prover time, verifier time, and proof size for the commitment-
+constraint proof, the linear-constraint proof, and the quadratic-constraint proof.
+We treat the binary-property proof as a composition of these three components
+and therefore omit it from the microbenchmarks. To accommodate varying N
+in a single build, we use a fixed q of 100 bits, so the measured sizes are not opti-
+mized per-N by modulus tuning. We use small-coefficient challenges in {0, ±1}
+with an operator-norm target T = 9. To target at least 90-bit security in this
+configuration, we run the full protocol twice via standard parallel repetition.
+    Our implementation uses NTT-based multiplication for ring operations and
+batched matrix-vector multiplication. We do not use SIMD-specific optimiza-
+tions or multi-threaded accumulation in this baseline, so the results should be
+read as conservative reference measurements.
+    Figure 5 reports prover time, verifier time, and proof size for the three proof
+components. Prover time grows as expected with N under fixed security, re-
+flecting O(N ) ring work for folding and auxiliary multiplications. Verification
+is dominated by the commitment proof due to matrix-vector multiplications,
+while the linear and quadratic checks are comparatively lightweight. Proof size
+is largest for the commitment proof because it carries the folded intermediate
+commitment state.
+
+Comparison with Greyhound. We compare against Greyhound [36], which pro-
+vides a public implementation and is representative of lattice-based PCS evalua-
+tion proofs. Our hardware does not support the same SIMD instruction set used
+by the Greyhound implementation, so we do not compare wall-clock timings
+across codebases. Instead, we compare ring-operation counts derived from each
+4
+     https://github.com/lattice-dogs/labrador
+
+
+                                          28
+    Fig. 5. Benchmark comparison of commitment, linear, and quadratic proofs
+
+          Table 5. Ring-operation counts for Greyhound [36] and Serval
+
+                   Prover ops                           Verifier ops
+
+Phase       [36]           Ours                  [36]                  Ours
+             √                       
+Init.   N + κ N N 8ℓ + (ι + 1) κ+ℓ
+                                2
+                                                  –                4κ2 ι + 12
+                                  
+Mid.       –    N 4ℓ + (ι + 1) κ+ℓ
+                                4
+                                                 –        (8κ2 ι + 28)(log N − 2)
+                                          √     2
+                                           N ι(κ + 2κ
+                                                    + 4)     ℓ(12 + 2κ + 4ι
+Final       N             2ℓ(1 + ι)
+                                             +κ + 1              +2κι) + 16
+
+
+
+protocol’s specification and cross-check them against the reference implementa-
+tion, focusing on evaluation-proof routines. We report these counts in Table 5
+under a common choice of (q, d) and comparable challenge distributions.
+    Figure 6 plots the resulting prover and verifier ring-operation counts as a
+function of N . For small N , our verifier can be modestly
+                                                     √        more costly due to
+explicit norm checks and the smaller gap between N and log N . As N grows,
+the verifier advantage becomes pronounced, matching the asymptotic polyloga-
+rithmic verification cost of Serval. On the prover side, the main overhead comes
+from the base-2 decomposition factor ℓ, and the ratio is correspondingly stable.
+
+
+6   Conclusion
+Serval (Slack-free Euclidean Radius Verification for Algebraic Lattices), is a post-
+quantum PCS that gives succinct evaluation proofs with a slack-free ℓ2 binding
+guarantee under standard M-SIS and a transparent setup. Like its namesake,
+Serval targets the bound sharply: it enforces the Euclidean radius without slack.
+Our design reduces commitment consistency, evaluation correctness, and lattice
+smallness to one inner-product-shaped relation over Rq , so a single log N split-
+and-fold engine drives the entire protocol and yields polylogarithmic verification
+with essentially linear proving.
+    The crux is an exact norm mechanism that fits this recursion. We decompose
+slack-free ℓ2 soundness into a ring self-inner-product claim that prevents modular
+wraparound and a binary coefficient constraint that pins ℓ∞ exactly, and we
+
+
+                                          29
+    Fig. 6. Ring-operation counts for Greyhound and Serval (y-axis in log scale)
+
+
+express binarity itself via randomized inner-product checks with tensor structure.
+To preclude adaptive fabrication, the prover commits to the derived auxiliary
+witness before the verifier samples the follow-on challenges. Because every check
+shares the same recursion and state, the composed protocol avoids a separate
+range-proof subsystem and stays naturally batching- and recursion-friendly.
+    Under the stated parameter regime (prime q with the required invertibility
+condition for challenges, and q > 2N ℓd for the exact-norm reduction), sound-
+ness follows from coordinate-wise special soundness of the shared recursion plus
+the negligible error from t binary-check repetitions. In this scope, our concrete
+comparison shows competitive proof sizes and fast verification while providing
+the stronger no-slack norm guarantee that prior post-quantum PCSs typically
+relax. An immediate direction is tighter constant-alphabet range enforcement
+that preserves the same log N engine, and a full end-to-end instantiation with
+Fiat–Shamir and LaBRADOR-style compaction to reduce constants in practice.
+
+
+Acknowledgment
+We used generative AI tools (e.g., ChatGPT) for phrasing and grammar correc-
+tion. All technical content, data, code, and conclusions are by the authors, who
+have reviewed the manuscript and take full responsibility for it.
+
+
+
+
+                                        30
+References
+
+ 1. Ajtai, M.: Generating hard instances of lattice problems (extended abstract). In:
+    STOC. pp. 99–108 (1996). https://doi.org/10.1145/237814.237838
+ 2. Albrecht, M.R., Cini, V., Lai, R.W.F., Malavolta, G., Thyagarajan, S.A.K.:
+    Lattice-based SNARKs: Publicly verifiable, preprocessing, and recursively com-
+    posable - (extended abstract). In: CRYPTO Part II. pp. 102–132 (2022). https:
+    //doi.org/10.1007/978-3-031-15979-4_4
+ 3. Albrecht, M.R., Fenzi, G., Lapiha, O., Nguyen, N.K.: SLAP: Succinct lattice-based
+    polynomial commitments from standard assumptions. In: EUROCRYPT Part VI.
+    pp. 90–119 (2024). https://doi.org/10.1007/978-3-031-58754-2_4
+ 4. Attema, T., Lyubashevsky, V., Seiler, G.: Practical product proofs for lattice com-
+    mitments. In: CRYPTO Part II. pp. 470–499 (2020)
+ 5. Backes, M., Datta, A., Kate, A.: Asynchronous computational VSS with reduced
+    communication complexity. In: CTRSA. pp. 259–276 (2013). https://doi.org/
+    10.1007/978-3-642-36095-4_17
+ 6. Becker, A., Ducas, L., Gama, N., Laarhoven, T.: New directions in nearest neighbor
+    searching with applications to lattice sieving. In: SODA. pp. 10–24 (2016), https:
+    //doi.org/10.1137/1.9781611974331.ch2
+ 7. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Fast Reed-Solomon interactive
+    oracle proofs of proximity. In: ICALP. pp. 14:1–14:17 (2018). https://doi.org/
+    10.4230/LIPICS.ICALP.2018.14
+ 8. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Scalable, transparent,
+    and post-quantum secure computational integrity. IACR Cryptol. ePrint Arch.
+    2018/046 (2018)
+ 9. Beullens, W., Seiler, G.: LaBRADOR: Compact proofs for R1CS from module-
+    SIS. In: CRYPTO Part V. pp. 518–548 (2023). https://doi.org/10.1007/
+    978-3-031-38554-4_17
+10. Bhadauria, R., Hazay, C., Venkitasubramaniam, M., Wu, W., Zhang, Y.: Private
+    polynomial commitments and applications to MPC. In: PKC Part II. pp. 127–158
+    (2023). https://doi.org/10.1007/978-3-031-31371-4_5
+11. Bootle, J., Chiesa, A., Sotiraki, K.: Lattice-based succinct arguments for NP with
+    polylogarithmic-time verification. In: CRYPTO Part II. pp. 227–251 (2023). https:
+    //doi.org/10.1007/978-3-031-38545-2_8
+12. Bootle, J., Lyubashevsky, V., Nguyen, N.K., Seiler, G.: A non-PCP approach to
+    succinct quantum-safe zero-knowledge. In: CRYPTO Part II. pp. 441–469 (2020).
+    https://doi.org/10.1007/978-3-030-56880-1_16
+13. Bünz, B., Bootle, J., Boneh, D., Poelstra, A., Wuille, P., Maxwell, G.: Bulletproofs:
+    Short proofs for confidential transactions and more. In: S&P. pp. 315–334 (2018).
+    https://doi.org/10.1109/SP.2018.00020
+14. Bünz, B., Fisch, B., Szepieniec, A.: Transparent SNARKs from DARK compil-
+    ers. In: EUROCRYPT Part I. pp. 677–706 (2020). https://doi.org/10.1007/
+    978-3-030-45721-1_24
+15. de Castro, L., Peikert, C.: Functional commitments for all functions, with trans-
+    parent setup and from SIS. In: EUROCRYPT Part III. pp. 287–320 (2023).
+    https://doi.org/10.1007/978-3-031-30620-4_10
+16. Chen, B., Bünz, B., Boneh, D., Zhang, Z.: HyperPlonk: Plonk with linear-time
+    prover and high-degree custom gates. In: EUROCRYPT Part II. pp. 499–530
+    (2023). https://doi.org/10.1007/978-3-031-30617-4_17
+
+
+                                           31
+17. Chiesa, A., Hu, Y., Maller, M., Mishra, P., Vesely, P., Ward, N.P.: Marlin: Prepro-
+    cessing zkSNARKs with universal and updatable SRS. In: EUROCRYPT Part I.
+    pp. 738–768 (2020). https://doi.org/10.1007/978-3-030-45721-1_26
+18. Cini, V., Lai, R.W.F., Malavolta, G.: Lattice-based succinct arguments from van-
+    ishing polynomials - (extended abstract). In: CRYPTO Part II. pp. 72–105 (2023).
+    https://doi.org/10.1007/978-3-031-38545-2_3
+19. Cini, V., Malavolta, G., Nguyen, N.K., Wee, H.: Polynomial commitments from lat-
+    tices: Post-quantum security, fast verification and transparent setup. In: CRYPTO
+    Part X. pp. 207–242 (2024). https://doi.org/10.1007/978-3-031-68403-6_7
+20. Esgin, M.F., Nguyen, N.K., Seiler, G.: Practical exact proofs from lattices: New
+    techniques to exploit fully-splitting rings. In: Moriai, S., Wang, H. (eds.) ASI-
+    ACRYPT Part II. pp. 259–288 (2020)
+21. Esgin, M.F., Steinfeld, R., Liu, J.K., Liu, D.: Lattice-based zero-knowledge proofs:
+    New techniques for shorter and faster constructions and applications. In: Crypto
+    Part I. pp. 115–146 (2019)
+22. Fenzi, G., Moghaddas, H., Nguyen, N.K.: Lattice-based polynomial commitments:
+    Towards asymptotic and concrete efficiency. J. Cryptol. 37(3), 31 (2024). https:
+    //doi.org/10.1007/S00145-024-09511-8
+23. Fisch, B., Liu, Z., Vesely, P.: Orbweaver: Succinct linear functional commitments
+    from lattices. In: CRYPTO Part II. pp. 106–131 (2023). https://doi.org/10.
+    1007/978-3-031-38545-2_4
+24. Gentry, C., Sahai, A., Waters, B.: Homomorphic encryption from learning with
+    errors: Conceptually-simpler, asymptotically-faster, attribute-based. In: CRYPTO
+    Part I. pp. 75–92 (2013), https://doi.org/10.1007/978-3-642-40041-4_5
+25. Golovnev, A., Lee, J., Setty, S.T.V., Thaler, J., Wahby, R.S.: Brakedown: Linear-
+    time and field-agnostic SNARKs for R1CS. In: CRYPTO Part II. pp. 193–226
+    (2023). https://doi.org/10.1007/978-3-031-38545-2_7
+26. Hall-Andersen, M., Simkin, M., Wagner, B.: Foundations of data availability sam-
+    pling. IACR Commun. Cryptol. 1(4), 34 (2024), https://doi.org/10.62056/
+    a09qudhdj
+27. Kate, A., Zaverucha, G.M., Goldberg, I.: Constant-size commitments to poly-
+    nomials and their applications. In: ASIACRYPT. pp. 177–194 (2010). https:
+    //doi.org/10.1007/978-3-642-17373-8_11
+28. Langlois, A., Stehlé, D.: Worst-case to average-case reductions for module lat-
+    tices. Des. Codes Cryptogr. 75(3), 565–599 (2015). https://doi.org/10.1007/
+    S10623-014-9938-4
+29. Lee, J.: Dory: Efficient, transparent arguments for generalised inner products and
+    polynomial commitments. In: TCC Part II. pp. 1–34 (2021). https://doi.org/
+    10.1007/978-3-030-90453-1_1
+30. Ling, S., Nguyen, K., Stehlé, D., Wang, H.: Improved zero-knowledge proofs of
+    knowledge for the ISIS problem, and applications. In: PKC. pp. 107–124 (2013).
+    https://doi.org/10.1007/978-3-642-36362-7_8
+31. Lund, C., Fortnow, L., Karloff, H.J., Nisan, N.: Algebraic methods for interac-
+    tive proof systems. J. ACM 39(4), 859–868 (1992). https://doi.org/10.1145/
+    146585.146605
+32. Lyubashevsky, V.: Lattice signatures without trapdoors. In: EUROCRYPT. pp.
+    738–755 (2012). https://doi.org/10.1007/978-3-642-29011-4_43
+33. Lyubashevsky, V., Nguyen, N.K., Plançon, M.: Lattice-based zero-knowledge
+    proofs and applications: Shorter, simpler, and more general. In: CRYPTO Part
+    II. pp. 71–101 (2022). https://doi.org/10.1007/978-3-031-15979-4_3
+
+
+                                          32
+34. Lyubashevsky, V., Seiler, G.: Short, invertible elements in partially split-
+    ting cyclotomic rings and applications to lattice-based zero-knowledge proofs.
+    In: EUROCRYPT Part I. pp. 204–224 (2018). https://doi.org/10.1007/
+    978-3-319-78381-9_8
+35. Micciancio, D., , Regev, O.: Lattice-based cryptography. In: Post-Quantum
+    Cryptography, pp. 147–191. Springer (2009). https://doi.org/10.1007/
+    978-3-540-88702-7_5
+36. Nguyen, N.K., Seiler, G.: Greyhound: Fast polynomial commitments from lat-
+    tices. In: CRYPTO Part X. pp. 243–275 (2024). https://doi.org/10.1007/
+    978-3-031-68403-6_8
+37. Stern, J.: A new identification scheme based on syndrome decoding. In: CRYPTO.
+    pp. 13–21 (1993). https://doi.org/10.1007/3-540-48329-2_2
+38. Wee, H., Wu, D.J.: Succinct vector, polynomial, and functional commitments from
+    lattices. In: EUROCRYPT Part III. pp. 385–416 (2023). https://doi.org/10.
+    1007/978-3-031-30620-4_13
+39. Zeilberger, H., Chen, B., Fisch, B.: BaseFold: Efficient field-agnostic polynomial
+    commitment schemes from foldable codes. In: CRYPTO Part X. pp. 138–169
+    (2024). https://doi.org/10.1007/978-3-031-68403-6_5
+
+
+A    Additional Related Works
+We provide additional context for Table 1 by summarizing representative post-
+quantum PCS frameworks and where norm-soundness slack enters their analyses.
+This section is intended as a high-level comparison along the axes used in Table 1
+(basis/setup/slack/proof size); for precise statements, we refer to the cited works.
+
+Inner-product-based approaches. A common lattice-based route commits to the
+coefficient vector and proves evaluation by reducing it to an inner product ⟨f⃗, ⃗x⟩
+with ⃗x = (1, x, . . . , xL−1 ) in the univariate case [2,15,38,18]. These schemes typ-
+ically yield logarithmic-size evaluation proofs (measured in Zq or ring elements),
+while at least one party performs work linear in L due to commitment consis-
+tency or binding checks. Some works reduce online verification via preprocessing
+or delegation (e.g., Dory-style techniques or structured evaluation support), at
+the cost of auxiliary keys/tables or stronger setup requirements [29,11,23]. Along
+the norm axis, most inner-product-based lattice PCSs guarantee extraction only
+up to a multiplicative slack, or tighten slack by strengthening the underlying as-
+sumption (e.g., k-SIS) rather than by proving an exact ℓ2 bound under standard
+SIS/LWE-type assumptions [23,2,18].
+
+Recursive approaches. Recursive (split-and-fold) PCSs verify an evaluation proof
+by a smaller proof system, which is itself verified recursively, yielding a polyloga-
+rithmic object checked by the verifier [7]. Optimized variants achieve very small
+verifier time but often rely on large auxiliary data and/or structured assump-
+tions, and their norm guarantees follow from the underlying extractor for the
+commitment primitive and thus inherit multiplicative slack [22,3]. Consequently,
+these constructions typically do not provide norm-preserving extraction under
+standard SIS/LWE-type assumptions.
+
+
+                                          33
+Hybrid approaches. Hybrid designs combine folding with proof-of-proof com-
+paction. Greyhound [36] builds on Brakedown [25] and achieves sublinear verifi-
+cation and sub-logarithmic proof via recursive proof-of-proof inner-product ar-
+guments, using LaBRADOR-style compaction to compress intermediate proofs.
+Cini et al. [19] propose a transparent SIS-based PCS (univariate and multilinear)
+that adopts FRI-style folding as in Basefold [39], achieving (poly-)logarithmic
+verification time and logarithmic proof size without third-party compaction.
+Both lines integrate modern norm-proof techniques and obtain a small constant
+slack (e.g., ≈2) in the stated norm guarantee for the extracted object, which
+suffices for many one-shot binding applications but falls short of slack-free ℓ2
+soundness.
+
+ Norm proofs. Tight coefficient-set checks (and thus tight ℓ∞ bounds for very
+ small sets) can be enforced via algebraic identities such as f⃗ ◦ (f⃗ − ⃗1) ◦ (f⃗ +
+⃗1) = ⃗0 together with structured transforms [21,20,4]. For ℓ2 bounds, the norm-
+ proof paradigm of Lyubashevsky [32] decomposes the constraint into a quadratic
+ relation together with an auxiliary bound, and more recent techniques reduce
+ the resulting slack to a small constant using modular Johnson–Lindenstrauss
+ arguments [9]. Our work differs in targeting slack-free ℓ2 soundness within a
+ PCS evaluation-proof framework under standard SIS/LWE-type assumptions,
+ as reflected in Table 1.
+
+
+B     Additional Preliminaries
+
+B.1    Interactive Proofs
+
+Let R ⊆ {0, 1}∗ × {0, 1}∗ × {0, 1}∗ be a ternary relation. For (pp, x, w) ∈ R, we
+call pp the public parameters, x the statement, and w a witness. For fixed pp
+and x, we write R(pp, x) := { w : (pp, x, w) ∈ R }.
+
+Definition 3 (Interactive proof system). An interactive proof system Π =
+(S, P, V) for R has a probabilistic polynomial-time (PPT) setup algorithm S and
+an interactive protocol between a PPT prover P and a verifier V. P convinces
+V that there exists w with (pp, x, w) ∈ R. Both P and V receive x and public
+parameters pp ← S(1λ ). P also holds a private witness w ∈ R(pp, x). At the end,
+V outputs accept or reject. The transcript is the sequence of messages exchanged.
+
+Definition 4 (Completeness). A proof system Π = (S, P, V) for the relation
+R satisfies completeness with completeness error ϵ(·) if for all adversaries A,
+
+                            pp ← S(1λ )
+                                                             
+
+ Pr b = 0 ∧ (pp, x, w) ∈ R (x, w) ← A(pp)                     = ϵ(λ) + negl(λ).
+                            (tr, b) ← ⟨P(pp, x, w), V(pp, x)⟩
+
+Furthermore, Π is said to satisfy perfect completeness whenever ϵ = 0.
+
+
+                                        34
+Definition 5 (Knowledge Soundness). A proof system Π = (S, P, V) for
+the relation R is knowledge sound with knowledge error ε(·) if there exists an
+expected PPT extractor E such that for any stateful PPT adversary P ∗ :
+
+                           pp ← S(1λ )
+                                                               
+                          (x, w, st) ← P ∗ (pp)                
+    b = 1 ∧ (pp, x, w) ∈
+ Pr                    /R                                       = ε(λ) + negl(λ).
+                           (tr, b) ← ⟨P ∗ (pp, x, w), V(pp, x)⟩ 
+                           w ← EP ∗ (pp, tr, x)
+
+The extractor E has black-box oracle access to the (malicious) prover P ∗ and can
+rewind it to any point in the interaction.
+
+
+B.2    Coordinate-wise Special Soundness
+
+Coordinate-wise special soundness generalizes special soundness, and implies
+knowledge soundness for a (2µ + 1)-round interactive proof system [22].
+   Let x = (x1 , x2 , . . . , xℓ ), y = (y1 , y2 , . . . , yℓ ) ∈ S ℓ . For i ∈ [ℓ], define ≡i so
+that ⃗x ≡i ⃗y means ⃗x and ⃗y agree in every coordinate except the i-th, i.e.,
+
+                      ⃗x ≡i ⃗y ⇔ (xi ̸= yi ∧ ∀j ∈ [ℓ] \ {i}, xj = yj ).
+
+   Next, for K = ℓ(k − 1) + 1, define the set:
+                                                                                    
+                                                     ∃e ∈ [K], ∀i ∈ [ℓ],            
+  SS(S, ℓ, k) := {⃗x1 , ⃗x2 , . . . , ⃗xK } ⊆ (S ℓ )K ∃Ji ⊆ [K] \ {e}, |Ji | = k − 1, .
+                                                      ∀j ∈ Ji , ⃗xe ≡i ⃗xj
+                                                                                    
+
+Equivalently, there is a “central” vector ⃗xe such that for each coordinate i, there
+are k − 1 other vectors that differ from it only at coordinate i; thus, for each i,
+the k vectors {⃗xe } ∪ {⃗xj : j ∈ Ji } vary only in the i-th coordinate.
+
+Definition 6 (ℓ-Coordinate-wise k-Special Soundness (Multi-round)).
+Let Π = (S, P, V) be a public-coin (2µ + 1)-round interactive proof for a relation
+R. In each round the verifier samples a challenge c ∈ C = S ℓ .
+    Consider a full (ℓ(k − 1) + 1)-ary tree of depth µ whose outgoing edges at
+every internal node are labeled by ℓ(k − 1) + 1 distinct challenges that, as a set,
+lie in SS(S, ℓ, k). Each root-to-leaf path is one transcript, so the tree collects
+K = (ℓ(k − 1) + 1)µ transcripts for the same statement x.
+    Π has ℓ-coordinate-wise k-special soundness if there exists a polynomial-time
+extractor that, given x and any such transcript tree for x, outputs a witness w
+with (x, w) ∈ R. This reduces to the standard k-special soundness when ℓ = 1.
+
+Lemma 3 ([22, Lemma 2.31]). Let Π = (S, P, V) be a public-coin (2µ + 1)-
+round interactive proof system for relation R and S ℓ be the challenge space of
+V in each round. If Π is ℓ-coordinate-wise k-special sound and (ℓ(k − 1))µ =
+poly(λ), it is knowledge sound with knowledge error µℓ(k − 1)/|S|.
+
+
+                                               35
+B.3   Polynomial Commitment Schemes
+Definition 7 (Polynomial Commitment Scheme (PCS)). A PCS PC over
+message space M = Z<N
+                   q [X] follows the syntax below:
+
+ – Setup(1λ ) → pp: Take security parameter λ and output public parameter pp.
+ – Commit(pp, f ) → (cm, st): Take public parameters pp, a message f , output
+   a commitment cm and de-commitment state st.
+ – Open(pp, cm, st, f ) → {0, 1}: Take public parameters pp, a commitment cm,
+   a message f , a de-commitment state st and output a bit indicating whether
+   cm is a valid commitment to f under pp.
+ – Eval(pp, cm, x, y; f, st) is a protocol to let prover P convince verifier V that
+   f is an opening to commitment cm and f (x) = y (or ⃗x in the multilinear
+   case. P also knows a polynomial f and the de-commitment state st).
+A PCS must satisfy three main properties below.
+Definition 8 (Evaluation Completeness). A PCS PC satisfies completeness
+if for any polynomial f and evaluation point u ∈ Z:
+                              pp ← Setup(1λ )
+                                                                 
+             Eval.V(pp,   cm,
+        Pr                   (cm, st) ← Commit(pp, f )            = negl(λ).
+             u, f (u), π) = 0
+                              π ← Eval.P(pp, cm, u, f (u); f, st)
+Definition 9 (Binding). A polynomial commitment scheme PC = (Setup,
+Commit, Open, Eval) satisfies binding if for every PPT adversary A:
+                 f ̸= f ′ ∧
+                                                                    
+                                                        λ
+                                     pp ←  Setup(1        )
+    Pr     Open(pp, cm, f, st)                                       = negl(λ).
+                           ′  ′      (cm, f, st, f ′ , st′ ) ← A(pp)
+         = Open(pp, cm, f , st ) = 1
+Definition 10 (Knowledge Soundness). A polynomial commitment scheme
+(Setup, Commit, Open, Eval) is knowledge sound with knowledge error ε(·) if for
+all stateful PPT adversary P ∗ , there exists an expected PPT extractor E where:
+                                        pp ← S(1λ )
+                                                                        
+         o = Open(pp, cm, f, st)       (cm, u, z, π) ← P ∗ (pp)         
+         b = 1 ∧ (o ̸= 1 ∨ f (u) ̸= z) b ← Eval.V(pp, cm, u, z, π)  = negl(λ).
+     Pr                                                                 
+
+                                        (f, st) ← EP ∗ (pp, cm, u, z, π)
+
+C     Proof For Theorem 2
+Theorem 6 (Coordinate-wise Special Soundness). Assume that the M-SIS
+problem is hard for rank κ and norm bound
+                          √              p               
+                  max N · N ℓ γlog N , N · N ℓ ια γα,log N ,
+
+where γlog N and γα,log N are defined as in the proof of Theorem 1.
+   Then Fig. 2 achieves 2-coordinate-wise 2-special soundness with an additional
+soundness error of 4 log
+                      |C|
+                          N
+                            + ( 2Nqℓd )t .
+Proof. We prove with the following steps.
+
+
+                                        36
+                              Fig. 7. A tree of accepted transcripts
+
+
+I. Extract the weak commitment opening. Given a tree of accepted transcripts
+of size K = 3log N −1 as specified in Definition 6 and organized as in Figure 7, we
+can extract a relaxed opening (s̄, s̄α ) where
+                   Com(c̄ · s̄) = c̄ · cm     and         ∥c̄s̄∥∞ ≤ 2log N −1 γlog N ,
+           Com(c̄ · s̄α ) = c̄ · cmα and ∥c̄s̄α ∥∞ ≤ 2log N −1 γα,log N ,
+          Qlog N −1
+with c̄ = i=1        c̄i , each c̄i ∈ C − C, where C − C is an abuse of notation
+denoting the set formed by individual differences, i.e., { c1 − c2 | c1 , c2 ∈ C }.
+   The extraction procedure for the witness ⃗s proceeds as follows. An identical
+process applies to ŝα ; we omit the details to avoid redundancy.
+                                                                        (i)
+ 1. Fix the challenges ⃗c1 , ⃗c2 , . . . , ⃗clog N −2 , and let (⃗clog N −1 )i∈[3] ∈ SS(C, 2, 2)
+    be three valid challenge vectors at round log N − 1. Consider the following
+    accepting transcripts:
+                      (0)                               (0)                          (0)
+                     clog N −1,0⃗slog N −1,L + clog N −1,1⃗slog N −1,R = ⃗slog N ,
+                      (1)                               (1)                          (1)
+                     clog N −1,0⃗slog N −1,L + clog N −1,1⃗slog N −1,R = ⃗slog N ,               (5)
+                      (2)                               (2)                          (2)
+                     clog N −1,0⃗slog N −1,L + clog N −1,1⃗slog N −1,R = ⃗slog N .
+                        (1)             (0)                     (2)             (0)
+    Assume that clog N −1,1 = clog N −1,1 and clog N −1,0 = clog N −1,0 . Then the
+    extractor computes a relaxed witness
+                                  (1)         (0)   (2)         (0)
+                                                                    !
+                                ⃗slog N − ⃗slog N ⃗slog N − ⃗slog N
+                  s̄log N −1 :=        (1)
+                                                  ,      (2)
+                                                                      ,
+                                     c̄log N −1        c̄log N −1
+             (1)              (1)           (0)                   (2)          (2)         (0)
+    where c̄log N −1 = clog N −1,0 − clog N −1,0 and c̄log N −1 = clog N −1,1 − clog N −1,1 .
+    By linearity of the commitment scheme, according to Eq. 5 we obtain
+            (1)                               (1)                             (1)
+    Com(c̄log N −1 · s̄log N −1,L ) = A0 (c̄log N −1 · s̄log N −1,L ) = c̄log N −1 ·A0⃗slog N −1,L ,
+                                                                                                (6)
+            (2)                                   (1)                         (2)
+    Com(c̄log N −1 · s̄log N −1,R ) = A0 (c̄log N −1 · s̄log N −1,R ) = c̄log N −1 ·A0⃗slog N −1,R .
+                                                                                                (7)
+
+
+                                                    37
+             (1)            (2)
+   In the c̄log N −1 = c̄log N −1 = c̄log N −1 case, which can be easily achieved
+   for challenges sampled from the space SS(C, 2, 2), the extractor obtains the
+   witness satisfying
+
+                                  c̄log N −1 · s̄log N −1 ∞ ≤ 2γlog N .
+2. Next, we repeat the above rewinding procedure by fixing ⃗c1 , ⃗c2 , . . . , ⃗clog N −3 ,
+   and sampling (⃗clog N −2,i )i∈[3] ← SS(C, 2, 2). From the resulting accepting
+   transcripts, we obtain
+             (0)                                (0)                              (0)
+            clog N −2,0 (⃗slog N −2,L )L + clog N −2,1 (⃗slog N −2,R )L = s̄log N −1,L ,
+             (1)                                (1)                              (1)
+            clog N −2,0 (⃗slog N −2,L )L + clog N −2,1 (⃗slog N −2,R )L = s̄log N −1,L ,
+             (2)                                (2)                              (2)
+            clog N −2,0 (⃗slog N −2,L )L + clog N −2,1 (⃗slog N −2,R )L = s̄log N −1,L .
+
+   An analogous set of equations holds for the right half.
+   By taking pairwise differences of the above equations, the extractor derives
+   the relaxed witness
+                          (1)             (0)         (1)              (0)
+                                                                                !
+                        s̄log N −1,L − s̄log N −1,L s̄log N −1,R − s̄log N −1,R
+         s̄log N −2,L =            (1)
+                                                   ,            (1)
+                                                                                  ,
+                                 c̄log N −2                   c̄log N −2
+
+   and analogously
+                                (2)             (0)             (2)              (0)
+                                                                                             !
+                            s̄log N −1,L − s̄log N −1,L        s̄log N −1,R − s̄log N −1,R
+         s̄log N −2,R =                 (2)
+                                                           ,             (2)
+                                                                                                 ,
+                                       c̄log N −2                      c̄log N −2
+            (1)           (1)             (0)                  (2)         (2)            (0)
+   where c̄log N −2 = clog N −2,0 − clog N −2,0 and c̄log N −2 = clog N −2,1 − clog N −2,1 .
+                          (1)            (2)
+   In the event that c̄log N −2 = c̄log N −2 = c̄log N −2 , the extracted witness satis-
+   fies the following consistency relations:
+             A0 · (c̄log N −2 · (s̄log N −2,L )L ) = c̄log N −2 · A0 (⃗slog N −1,L )L ,
+             A0 · (c̄log N −2 · (s̄log N −2,L )R ) = c̄log N −2 · A0 (⃗slog N −1,L )R
+             A0 · (c̄log N −2 · (s̄log N −2,R )L ) = c̄log N −2 · A0 (⃗slog N −1,R )L
+             A0 · (c̄log N −2 · (s̄log N −2,R )R ) = c̄log N −2 · A0 (⃗slog N −1,R )R .
+   Thus, we obtain
+                                                                                          
+                                                        A0 · c̄log N −2 · (⃗slog N −2,L )L 
+       Com(c̄log N −2 · s̄log N −2,L ) = A1 · G−1
+                                               2κ       A0 · c̄log N −2 · (⃗slog N −2,L )R
+                                         = c̄log N −2 · Com(⃗slog N −2,L ) ,
+   and similarly,
+                                                                                          
+                                                        A0 · c̄log N −2 · (⃗slog N −2,R )L 
+       Com(c̄log N −2 · s̄log N −2,R ) = A1 · G−1
+                                               2κ       A0 · c̄log N −2 · (⃗slog N −2,R )R
+                                         = c̄log N −2 · Com(⃗slog N −2,R ) .
+
+                                                 38
+     Moreover, the extracted (scaled) witness satisfies
+
+      c̄log N −1 · c̄log N −2 · s̄log N −2 ∞ ≤ 2 c̄log N −1 · s̄log N −1 ∞ ≤ 22 γlog N .
+                                          
+
+ 3. Repeating the above extraction procedure up to depth log N , the extractor
+    eventually recovers a relaxed witness s̄ defined as
+                                                                 !
+                                   (1)      (0)     (2)      (0)
+                                 s̄2 − s̄2        s̄2 − s̄2
+                           s̄ =         (1)
+                                                ,        (2)
+                                                                   .
+                                      c̄1              c̄2
+     Moreover, the extracted witness satisfies the following consistency relations:
+
+                 Com(c̄2 · s̄L ) = c̄2 · Com(⃗sL ) ,               Com(c̄2 · s̄R ) = c̄2 · Com(⃗sR ) .
+
+     Finally, the scaled witness obeys the ℓ∞ -norm bound
+                                      N −1 
+                                  logY
+                                          c̄i · s̄                ≤ 2log N −1 γlog N .
+                                         i=1                 ∞
+
+II. Prove the extracted witnesses satisfy linear and quadratic constraints. Next,
+we show that the extracted witness (s̄, s̄α ) satisfies required linear constraint and
+quadratic constraints, respectively.
+    The above extraction procedure proceeds through log N levels and outputs
+a collection of relaxed witnesses5
+                                                             
+                                               (s̄i , s̄α,i ) i∈[log N ] .
+     For the extracted witness
+                                                                   (1)           (0)         (2)         (0)
+                                                                                                               !
+                                                                ⃗slog N − ⃗slog N ⃗slog N − ⃗slog N
+     s̄log N −1 := s̄log N −1,L , s̄log N −1,R =                        (1)
+                                                                                  ,       (2)
+                                                                                                                   .
+                                                                      c̄log N −1        c̄log N −1
+                                                                                       (0)         (1)         (2)
+From the linear verification equations corresponding to ⃗slog N , ⃗slog N , and ⃗slog N ,
+we obtain
+           (1)          (0)             (1)            (0)               (lin)          (1)
+    ⟨⃗a0 , ⃗slog N − ⃗slog N ⟩ = ⟨⃗clog N −1 − ⃗clog N −1 , πlog N −1 ⟩ = c̄log N −1 · vlog N −1,L ,
+           (2)          (0)             (2)            (0)               (lin)          (2)
+    ⟨⃗a0 , ⃗slog N − ⃗slog N ⟩ = ⟨⃗clog N −1 − ⃗clog N −1 , πlog N −1 ⟩ = c̄log N −1 · vlog N −1,R .
+
+     Dividing by the corresponding challenge differences yields
+
+            ⟨⃗a0 , s̄log N −1,L ⟩ = vlog N −1,L ,                ⟨⃗a0 , s̄log N −1,R ⟩ = vlog N −1,R .
+
+   Next, consider the quadratic verification. By construction, for each accepting
+transcript i ∈ {0, 1, 2},
+                       (i)        (i)                                 (i)
+                      ⃗slog N = clog N −1,0 s̄log N −1,L + clog N −1,1 s̄log N −1,R .
+5
+    We identify (s̄1 , s̄α,1 ) with the final extracted witness pair and denote it by (s̄, s̄α ).
+
+
+                                                          39
+Substituting this expression into the quadratic check shows that the verifier is
+evaluating a degree-2 polynomial in the challenge ⃗clog N −1 whose coefficients are
+precisely
+
+           ⟨s̄log N −1,L , σ−1 (s̄log N −1,L )⟩, ⟨s̄log N −1,L , σ−1 (s̄log N −1,R )⟩,
+           ⟨s̄log N −1,R , σ−1 (s̄log N −1,L )⟩, ⟨s̄log N −1,R , σ−1 (s̄log N −1,R )⟩.
+
+    Therefore, if the quadratic verification holds for randomly chosen ⃗clog N −1 ∈ C
+                                        (1)        (2)
+but the claimed values (Llog N −1 , Mlog N −1 , Mlog N −1 , Mlog N −1 ) do not corre-
+spond to the true inner products of s̄log N −1 , then this yields a nonzero degree-2
+polynomial that vanishes at a random point. By the Schwartz–Zippel lemma,
+this occurs with probability at most 2/|C|. A similar analysis applies to all other
+rounds. Therefore, the overall soundness error of the quadratic relation proof is
+bounded by 2 log N/|C|.
+    The same argument applies to all other linear and quadratic constraints,
+which we omit for brevity.
+
+ III. Prove the extracted s̄ has binary coefficients. Recall that we reduce the
+ binary constraint on ⃗s to a collection of constraints on the constructed vector
+⃗sα . In particular, the well-formedness of ⃗sα , together with its relation with ⃗s
+ have been enforced via commitment, linear, and quadratic constraints, implies
+ that the original vector ⃗s satisfies the desired binary constraint.
+     Next, we analyze the soundness error introduced by this constraint reduction.
+ Specifically, we reduce the binary constraint
+
+                                       ⃗s ◦ (⃗s − ⃗1) = ⃗0
+
+to the randomized linear constraint
+
+                                      α ◦ ⃗s, ⃗s − ⃗1⟩ = 0,
+                                     ⟨⃗
+
+which introduces a soundness error bounded by Nqℓd .
+    Moreover, to certify the well-formedness of ⃗sα = ⃗s ◦ α
+                                                           ⃗ , we further reduce it
+to checking the linear consistency constraint
+
+                                    ⟨⃗sα , ⃗r⟩ = ⟨⃗s, ⃗r ◦ α
+                                                           ⃗ ⟩,
+
+which incurs an additional soundness error of at most Nqℓd .
+   For the case where q = poly(λ), to achieve
+                                               negligible soundness error, it
+                                                         λ
+suffices to repeat the binary proof t = Θ              log q      times using independent ran-
+domness.                                                                                    ⊓
+                                                                                            ⊔
+
+
+D    Soundness Proof for Optimized Version in Section 5.1
+Theorem 7 (Knowledge Soundness for Composed Scheme). The com-
+posed scheme described in Section 5.1 is knowledge-sound in the random-oracle
+
+
+                                               40
+model under the standard adaptive security definition, with overall soundness
+error
+                              ϵse + ϵfs + ϵLa .
+Here, ϵse denotes the knowledge-soundness error contributed by Serval, as estab-
+lished in Theorem 3; ϵfs captures the additional soundness error introduced by the
+Fiat–Shamir transformation; and ϵLa is the knowledge-soundness error inherited
+from LaBRADOR.
+
+Proof. Owing to the knowledge-soundness guarantee of LaBRADOR, an ex-
+tractor is guaranteed to obtain a set of witnesses that satisfy the claimed dot-
+product constraint. This, in turn, ensures that the verification procedure of the
+non-interactive instantiation of Serval is passed.
+    In our Fiat–Shamir transformation, the challenge in each round is derived
+by hashing the commitment to the entire transcript accumulated up to that
+point. Since the hash function is modeled as a random oracle, the resulting
+challenges are indistinguishable from uniformly random challenges and there-
+fore satisfy the requirements for knowledge soundness in the ROM. This allows
+the standard rewinding-and-reprogramming extractor to obtain two accepting
+transcripts with divergent challenges and extract the corresponding witness.
+    Consequently, if all non-interactive proofs produced within the protocol verify
+successfully, then, by the knowledge-soundness theorem of Serval (Theorem 3),
+one can extract a witness that satisfies all constraints imposed by the Serval
+protocol.                                                                         ⊔
+                                                                                  ⊓
+
+
+E     Batching
+
+We propose batching techniques for multiple polynomials at a single point, a sin-
+gle polynomial at multiple points, and multiple polynomials at multiple points.
+
+
+Multiple Polynomials Evaluated at a Single Point. For claims fi (u) =
+vi (or fi (⃗u) = vi ) for (fi )i∈[n] at a common point, the verifier samples α ⃗ ←
+  n
+                                                     Pn−1
+Zq . The prover forms a linear combination f := i=0 αi fi and both set y :=
+Pn−1
+   i=0 αi vi . They run one evaluation proof for f at u (or ⃗
+                                                            u) with claimed value y.
+Completeness is immediate. Knowledge soundness follows from rewinding plus
+the PCS extractor: after extracting f , repeated rewinding recovers each fi .
+
+
+Single Polynomial Evaluated at Multiple Points. Suppose the claims are
+f (ui ) = vi for i ∈ [n]. Multilinear and univariate cases are slightly different.
+    Multilinear Case: The prover first constructs f˜(⃗x) =                                ⃗
+                                                                      P
+                                                                         ⃗b∈{0,1}log N f (b) ·
+                                    N −1
+                   e ⃗b, ⃗x) := log
+e ⃗b, ⃗x), where eq(
+                               Q
+eq(                              i=0     (b[i]x[i] + (1 − b[i])(1 − x[i])). Since the two
+polynomials coincide on all Boolean vectors ⃗b ∈ {0, 1}log N and f is also multilin-
+ear, it can be proved that f˜(⃗x) = f (⃗x), ∀⃗x ∈ Zlogq
+                                                         N
+                                                           . Hence, f˜(⃗ui ) = f (⃗ui ) = vi .
+
+
+                                             41
+                                                                     Pn−1
+    The verifier samples α ⃗ ← Znq and the prover sets g(⃗x) = i=0 αi · f (⃗x) ·
+ e x, ⃗ui ). They run a sum-check protocol [31] for n−1                                ⃗
+                                                   P                P
+eq(⃗                                                 i=0 αi vi =       ⃗b∈{0,1}log N g(b).
+This reduces to checking whether f (⃗r) = v and eq(⃗
+                                                   e r, ⃗ui ) = zi for some random ⃗r
+determined by the verifier. The latter can be computed by the verifier, while
+the former can be verified via the PCS. Completeness and knowledge soundness
+follow from those of the sum-check protocol and the PCS in Section 4.
+                                             i
+    Univariate Case: If we define Xi := X 2 , the univariate polynomial f (X) =
+PN −1         i
+   i=0 fi X can be rewritten in a multilinear form as
+
+     f (X0 , X1 , . . . , Xℓ−1 ) = f0 + f1 X0 + f2 X1 + · · · + fN −1 X0 X1 · · · Xℓ−1 ,
+
+with the same coefficient vector f⃗ = (f0 , f1 , . . . , fN −1 ). By constructing ⃗ui =
+                       ℓ−1
+(ui , u2i , . . . , u2i ), we obtain that f (⃗ui ) = f (ui ).
+     Thus, the protocol reduces to the multilinear setting, with ⃗ui in a special
+structured form, and the remaining steps proceed as in the multilinear case,
+ultimately reducing to a single-point evaluation check at a random point ⃗r.
+
+
+Multiple Polynomials Evaluated at Multiple Points. Now the claims are
+fi (⃗ui ) = vi for i ∈ [n]. The construction extends naturally from the second case.
+The verifier first samples a random challenge vector α     ⃗ ∈ Znq , and the prover
+                                                 Pn−1
+constructs the combined polynomial g(⃗x) = i=0 αi · fi (⃗x) · eq(⃗e x, ⃗ui ). Both then
+                                        Pn−1         ? P              ⃗
+engage in a sum-check protocol for          i=0αi vi = ⃗      log N g(b).
+                                                            b∈{0,1}
+    As before, verification reduces to checking evaluations of individual fi at a
+random point ⃗r, which can be handled using the batching technique described
+in the first case. Similarly, completeness and knowledge soundness are ensured
+by the corresponding properties of both the sum-check protocol and the PCS.
+
+
+
+
+                                             42
+

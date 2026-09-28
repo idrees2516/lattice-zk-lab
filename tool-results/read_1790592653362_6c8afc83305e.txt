@@ -1,0 +1,602 @@
+     1→                      RoKoko⋆ : Lattice-based Succinct Arguments,
+     2→                                a Committed Refinement
+     3→
+     4→Michael Klooß1 , Russell W. F. Lai2 , Ngoc Khanh Nguyen3 , Michal Osadnik2 , and Lorenzo Tucci2
+     5→                         1
+     6→                             KASTEL, Karlsruhe Institute of Technology, Karlsruhe, Germany
+     7→                                        2
+     8→                                          Aalto University, Espoo, Finland
+     9→                                      3
+    10→                                         King’s College London, London, UK
+    11→
+    12→
+    13→
+    14→        Abstract. We present RoKoko, a new lattice-based succinct argument system that achieves a linear-
+    15→        time prover alongside polylogarithmic communication and verifier complexity. Asymptotically, our
+    16→        construction improves upon RoK and Roll (ASIACRYPT 2025), the first post-quantum SNARK with
+    17→        Õ(λ) proof size, by a multiplicative factor of Θ(log λ). Practically, our system yields proofs around 110 KB,
+    18→        while outperforming the state-of-the-art polynomial commitment scheme Greyhound (CRYPTO 2024)
+    19→        with ∼ 50× faster verification, similar prover time, and competitive proof size. Our framework natively
+    20→        supports (tensor-)structured relations, such as polynomial evaluation and sumcheck relations.
+    21→        At a high level, our construction follows the recursive split-and-fold paradigm: the prover first splits the
+    22→        witness into ρ sub-witnesses, sends the corresponding cross-terms, and then folds them into a single
+    23→        witness that is shorter by a factor of ρ using verifier challenges. Prior works typically restrict ρ = O(1)
+    24→        to preserve succinct verification and maintain the optimal Õ(λ) proof size. We overcome this “constant
+    25→        barrier”, which enables larger ρ and thereby reduces the proof size. To achieve this, we introduce the
+    26→        following technical contributions.
+    27→         (i) Committed folding. Instead of sending O(ρ) cross-terms in the clear, the prover commits to the
+    28→             messages and later proves that the committed vector satisfies the verification relations. This enables
+    29→             a larger shrinking factor, reducing the number of recursion rounds. While this strategy has been
+    30→             successfully used in LaBRADOR (CRYPTO 2023), our main novelty is to do so while preserving
+    31→             succinct verification.
+    32→        (ii) Recursive commitments. We generalise the double-commitment technique from LaBRADOR into
+    33→             a framework for recursive commitments, yielding further compression in commitment size. This
+    34→             results in concrete improvements in communication within each recursion round.
+    35→       (iii) Sumcheck-driven structured recursion. We extend the sumcheck framework from SALSAA (ePrint
+    36→             2025/2124) to prove substantially more complex constraints arising in our construction, including
+    37→             correctness of random projections, inner-product claims and well-formedness of recursive commit-
+    38→             ments, and open for future extensions. Expressing these constraints as sumcheck relations takes
+    39→             considerable effort, but the resulting protocols compose seamlessly with the structured recursion,
+    40→             yielding linear-time proving and succinct verification.
+    41→
+    42→
+    43→1     Introduction
+    44→
+    45→Succinct argument systems [Kil92, Mic94] allow a prover to convince a verifier of a statement’s
+    46→validity using communication that is significantly shorter than the witness itself. This powerful
+    47→compression capability underlies some of the most impactful applications in modern cryptography,
+    48→including verifiable outsourced computation [KP16, Lee21, GSW23], verifiable fully-homomorphic
+    49→encryption [GBK+ 24, LLZ+ 25, ABPS24, ZLW+ 25], aggregate signatures [BK20, AAB+ 24], and
+    50→verifiable delay functions [LM23, OKC+ 25].
+    51→   As quantum computers threaten the security foundations of group-based cryptography, the
+    52→demand for post-quantum secure succinct arguments has become increasingly urgent. Lattice-based
+    53→constructions offer a compelling direction as they rely on well-studied hardness assumptions believed
+    54→⋆
+    55→    also known as “late baRoK”.
+    56→
+    57→
+    58→                                                             1
+    59→to remain secure against quantum attacks, while their rich algebraic structure enables efficiency
+    60→advantages that hash-based approaches cannot easily match.
+    61→
+    62→1.1   Two Approaches in Lattice-Based Succinct Arguments
+    63→
+    64→At the core of lattice-based arguments lies an efficient proof of knowledge of a low-norm witness
+    65→vector w ∈ Rm satisfying
+    66→                                 Fw = y mod q and ∥w∥ ≤ β,                                    (1)
+    67→where R = Z[ζ] denotes the ring of integers of the f-th cyclotomic field K := Q(ζ) of degree
+    68→φ = φ(f). While the linear relation is straightforward, the challenge is proving that w is short:
+    69→existing constructions either prove a relaxed variant of the equation, affecting parameter choices, or
+    70→add machinery to enforce shortness.
+    71→   A prominent instance of the former category is the lattice adaptation of the Bulletproofs
+    72→protocol [BLNS20, AL21, ACK21, BCS21] which was the first lattice-based argument system with
+    73→poly(log m, λ) proof size. Let ρ ∈ N be the shrinking factor. To prove (1), the prover and verifier
+    74→partition F as [F0 | F1 | · · · | Fρ−1 ], while the prover decomposes the witness w := (wi )i∈[ρ]
+    75→into ρ smaller vectors w0 , . . . , wρ−1 ∈ Rm/ρ . The prover then transmits all ρ2 cross-terms gi,j :=
+    76→Fi wj mod q for all pairs (i, j) ∈ [ρ]2 , to the verifier, who immediately checks that
+    77→                               ρ−1
+    78→                               X              ρ−1
+    79→                                              X
+    80→                                     gi,i =         Fi wi = Fw = y   (mod q).                       (2)
+    81→                               i=0            i=0
+    82→
+    83→The verifier then samples challenges c0 , . . . , cρ−1 ← C from a challenge space C ⊆ R consisting of
+    84→short ring elements. The key observation is that the folded witness z := ρ−1               m/ρ satisfies
+    85→                                                                            P
+    86→                                                                              i=0 ci wi ∈ R
+    87→
+    88→                        ρ−1           ρ−1 X ρ−1
+    89→                                 !
+    90→                        X             X
+    91→                            ci Fi z =              ci cj gi,j mod q and ∥z∥ ≤ βz                     (3)
+    92→                         i=0                  i=0 j=0
+    93→
+    94→for an appropriately chosen bound βz . As this statement retains the structure of (1), the prover can
+    95→recursively repeat the procedure O(log m) times until the final folded witness is small enough to
+    96→reveal directly.
+    97→    As analysed in [AL21, ACK21, BCS21], the lattice Bulletproofs protocol suffers from several
+    98→efficiency drawbacks. Most notably, knowledge soundness critically depends on subtractive sets C, in
+    99→which the difference of any two distinct c, c′ ∈ C must be invertible in Rq := R/qR with a short
+   100→inverse. This limits C to polynomial size [AL21], implying an inverse-polynomial soundness error;
+   101→amplifying it to 2−λ then increases communication by a factor Ω(λ/ log λ). As a consequence, lattice
+   102→Bulletproofs have large communication, both in theory and in practice.
+   103→    Subsequent work in this area has diverged into two main directions. One path focuses on
+   104→constructing succinct arguments with concretely efficient proof sizes, while the other aims at
+   105→asymptotically efficient arguments with polylogarithmic verification. We elaborate on both directions
+   106→below.
+   107→
+   108→Path 1: Concrete efficiency and proof size. The lattice Bulletproofs protocol was substantially
+   109→advanced by LaBRADOR [BS23], which introduces several key modifications. The first is that it
+   110→departs from subtractive sets and instead adopts the random-projection technique of [BL17, LNS21,
+   111→
+   112→                                                         2
+   113→GHL22, LNP22, BS23]. To demonstrate that w is (approximately) short, the verifier samples a
+   114→random integer matrix J ∈ Zr×mφ with small entries (e.g. from {−1, 0, 1}). The prover computes the
+   115→projected vector v := Jcf(w) mod q ∈ Zrq , where cf(w) ∈ Zmφ is the standard coefficient embedding
+   116→of the ring vector w. The verifier checks that v has small norm, while the prover additionally proves
+   117→v well-formed; this is a linear relation over Rq [LNP22]. Crucially, this removes the dependence on
+   118→subtractive sets, so the protocol needs no repetitions.
+   119→    The second change is that the prover no longer transmits all ρ2 cross-terms gi,j . Instead, the
+   120→prover commits to the concatenated vector g := (gi,j )i∈[ρ],j∈[ρ] , and later proves that the committed
+   121→value satisfies the linear constraints required for verification, namely those in Equations (2) and (3).
+   122→                                                                                                    1/3
+   123→This committed folding approach allows LaBRADOR to select large shrinking factors ρi = O(mi )
+   124→at each round (where mi is the witness size entering round i), yielding only O(log log m) recursive
+   125→rounds.
+   126→    Finally, in LaBRADOR the witness w is committed in a double-commitment fashion4 . Specifically,
+   127→the commitment tout to a short vector w is defined by
+   128→
+   129→                    tin := (Fin ⊗ Iρ )w mod q, and tout := Fout G−1 (tin ) mod q,
+   130→                                                                             
+   131→
+   132→
+   133→where G−1 (·) denotes the standard gadget decomposition map.
+   134→    This two-layer design enables a reduction in the final commitment size: the (Module-)SIS rank of
+   135→the outer commitment matrix Fout becomes essentially independent of the witness length m, unlike
+   136→in classical Ajtai commitments [Ajt96].
+   137→    As a consequence of the aforementioned improvements, LaBRADOR achieves concretely efficient
+   138→proof sizes, around 60 KB even for large statements (with witness consisting of ≈ 220 ring elements).
+   139→Its main drawback is the linear verification time. Indeed, even processing the random projection
+   140→matrix J already takes time Ω(m). The subsequent work Greyhound [NS24] addresses this limitation
+   141→                                                                                               √
+   142→by invoking LaBRADOR as a subroutine, where each invocation is on a witness of length O( m).
+   143→As a result, Greyhound inherits the appealing proof sizes of LaBRADOR while achieving sublinear
+   144→verification time.
+   145→
+   146→Path 2: Succinct verification. Motivated by the growing interest in constructing SNARKs from
+   147→Polynomial Interactive Oracle Proofs, there has been much research on lattice-based polynomial
+   148→commitment schemes (PCS). In this direction, [CLM23] first adapted lattice Bulletproofs to sup-
+   149→port succinct verification by endowing the commitment matrix F with a tensor structure. This
+   150→modification leads to a commitment that is binding under a new assumption, called the Vanishing
+   151→SIS (vSIS) assumption. Independently, [BCS23] achieved fast verification for lattice Bulletproofs
+   152→via additional preprocessing. However, both constructions inherit all the underlying limitations of
+   153→lattice Bulletproofs itself [BCS23, CLM23].
+   154→    A different line of work [AFLN24, CMNW24, KLNO24b] develops succinct arguments with
+   155→polylogarithmic verification time by applying FRI-style [BBHR18] split-and-fold techniques. These
+   156→protocols still require repetitions due to the use of subtractive sets, but they yield more efficient
+   157→proofs than Bulletproofs, since they involve only O(ρ) cross-terms, compared to O(ρ2 ) required in
+   158→lattice Bulletproofs.
+   159→    The reliance on subtractive sets was later removed by [KLNO25], which adapts the random
+   160→projection strategy to demonstrate shortness. Directly using LaBRADOR-style random projections
+   161→is infeasible here due to the goal of achieving fast verification. To address this, the authors employ
+   162→4
+   163→    In [BS23], the authors refer to this as “inner” and “outer” commitments.
+   164→
+   165→
+   166→                                                          3
+   167→ tensor-structured projection matrices of the form J := I ⊗ J′ , where I is the identity matrix and J′
+   168→ is a short random challenge matrix with O(λ) rows and columns. Consequently, the verifier only
+   169→ needs to operate on J′ , and with a carefully designed split-and-fold protocol, succinct verification
+   170→ becomes possible. As a result, [KLNO25] achieves asymptotically optimal Õ(λ)-sized proofs, notable
+   171→ since all prior post-quantum argument systems, including hash-based ones [ACFY24, ACFY25], only
+   172→ obtained Õ(λ2 ) proofs. Despite this asymptotic, concrete efficiency remains limited as proof sizes
+   173→ scale to a few megabytes (with witness of ≈ 223 ring elements).
+   174→     While random projections can demonstrate that the committed witness is approximately short,
+   175→ they cannot on their own certify exact norm bounds. To address this, [KLNO24b, KLNO25] showed
+   176→ how to prove inner products between committed vectors modulo q. Provided that w is sufficiently
+   177→ short, no modular wrap-around occurs, enabling the prover to establish inner products over Z.
+   178→ Building on this, SALSAA [KLOT25] adds sumcheck protocols [LFKN92] to verify exact ℓ2 norm
+   179→ and, unlike [KLNO24b, KLNO25], enjoys a linear prover.
+   180→
+   181→ Bridging the gap. LaBRADOR [BS23] achieves remarkably small proof sizes, owing to its use of
+   182→ super-constant folding, double-layer commitments, and random projections to establish shortness.
+   183→ However, its principal limitation is the linear verification time, and even with the improvement offered
+   184→ by Greyhound [NS24], the verifier remains more than two orders of magnitude slower than hash-
+   185→ based alternatives. Conversely, argument systems that support succinct verification are still far from
+   186→ concretely competitive. Although recent work incorporates structured Johnson–Lindenstrauss pro-
+   187→ jections into this setting, it remains unclear whether the other techniques underpinning LaBRADOR
+   188→ adapt to the succinct-verifier regime while preserving practical efficiency. This raises a question: can
+   189→ one design an argument system that admits polylogarithmic verification while achieving proof sizes
+   190→ and concrete performance similar to LaBRADOR and Greyhound?
+   191→
+   192→ 1.2   Our contributions
+   193→ We present RoKoko – a lattice-based argument system that unifies the strengths of both paths,
+   194→ achieving nearly the best of both worlds:
+   195→  (i) Succinct verification: polylogarithmic verifier runtime, matching the best Path 2 constructions;
+   196→ (ii) Optimal prover: linear-time proving, matching the lower bound;
+   197→(iii) Compact proofs: proof sizes substantially improving on prior succinct-verification work,
+   198→      narrowing the gap to the LaBRADOR line;
+   199→(iv) Rich expressiveness: native support for structured relations, polynomial commitments, and
+   200→      natural arithmetisations such as R1CS.
+   201→
+   202→Technical innovations. Our main technical contribution is to adapt committed superconstant folding
+   203→– a technique pioneered by LaBRADOR [BS23] – to the vSIS-based framework that supports succinct
+   204→verification. In the LaBRADOR line, the verifier performs work proportional to the witness size, so
+   205→the folding structure can remain opaque to the verifier. In the succinct-verification regime, however,
+   206→the verifier must efficiently check consistency of the folded instances without implicitly reading
+   207→the full witness, which requires the folding to respect the algebraic structure of the underlying
+   208→commitment scheme. Concretely:
+   209→
+   210→  – Structured superconstant folding. We show how to fold by a superconstant factor within
+   211→    the vSIS-based framework while preserving the structure needed for succinct verification. We
+   212→
+   213→                                                    4
+   214→   extend the random projection technique of [KLNO25] to handle this more aggressive folding,
+   215→   yielding a significant reduction in the number of rounds.
+   216→ – Recursive commitments. Inspired by [BS23, BC25b], we introduce a recursive commitment
+   217→   structure where the outermost commitment – the only one the verifier inspects explicitly – has
+   218→   low rank independent of the witness size. This compresses the commitment component of the
+   219→   proof, which dominates proof size in prior constructions from Path 2 (the succinct-verification
+   220→   regime); such recursive commitments were not previously available in the structured setting.
+   221→ – Sumcheck-based linear-time proving. Building on [KLOT25], we integrate sumcheck pro-
+   222→   tocols to efficiently prove well-formedness of the recursive commitments and correctness of
+   223→   projections. The sumcheck machinery suits the recursive commitment structure well: the prover
+   224→   shows each commitment layer is correctly formed without materialising intermediate witnesses,
+   225→   achieving linear-time proving without sacrificing succinctness.
+   226→ – Implementation and evaluation. We implement RoKoko and conduct experiments, demon-
+   227→   strating that our improvements translate into practice: competitive proof sizes alongside faster
+   228→   verification compared to prior lattice-based constructions. We also give a complete asymptotic
+   229→   analysis and instantiate RoKoko as a SNARK for structured relations and as a PCS.
+   230→ – Incomplete-NTT library. As a side contribution, we provide the most efficient open-source
+   231→   standalone implementation, to date, of the “almost-splitting” cyclotomic ring arithmetic under-
+   232→   pinning our construction.
+   233→
+   234→   We summarise the concrete performance of RoKoko compared to prior post-quantum SNARKs and
+   235→PCSs in Table 1. Compared to SALSAA [KLOT25], the closest prior work with succinct verification,
+   236→RoKoko produces roughly 10× smaller proofs and reduces the combined commitment and prover
+   237→time by roughly 8×, while its verifier is roughly 1.8× slower. Compared to Greyhound [NS24],
+   238→which optimises for proof size and concrete efficiency but lacks succinct verification, RoKoko offers
+   239→roughly 52× faster verification on the target machine, reaching roughly 90× on the largest server
+   240→benchmark, with similar prover time but roughly 2.4× larger proofs. The trade-off is that RoKoko
+   241→achieves polylogarithmic verification time and relies on the vSIS assumption, while Greyhound has
+   242→smaller proofs and relies on the more standard Module-SIS assumption but without polylogarithmic
+   243→verification. We defer a detailed comparison of RoKoko against prior work to Section 9.5.
+   244→
+   245→1.3   Related work
+   246→Group- and hash-based succinct arguments. Group-based arguments such as Groth16 [Gro16],
+   247→PLONK [GWC19] and others [PHGR13, GGPR13, WTs+ 18, MBKM19, XZZ+ 19, BFS20, CHM+ 20]
+   248→achieve strong efficiency but rely on assumptions like discrete logarithm, and are thus insecure against
+   249→quantum adversaries. Hash-based argument systems, such as FRI [BBHR18], Ligero [AHIV23],
+   250→Aurora [BCR+ 19], Brakedown [GLS+ 23], and WHIR [ACFY25], offer post-quantum security and
+   251→transparent setup. In particular, WHIR achieves extremely efficient verification time. However,
+   252→hash-based schemes generally fall short in prover efficiency and proof size compared to lattice-based
+   253→alternatives.
+   254→
+   255→Non-succinct lattice-based arguments. Non-succinct lattice-based arguments [LNSW13,BLS19,
+   256→ALS20, LNP22] have proof size and verification time linear in the witness size, offering high concrete
+   257→efficiency for small relations. These protocols typically focus on the zero-knowledge property rather
+   258→than succinctness.
+   259→
+   260→                                                   5
+   261→Table 1. Concrete performance of our work vs. prior post-quantum SNARKs/PCSs (|π| = proof size in KB). Hash-
+   262→based: Brakedown [GLS+ 23], Ligero [AHIV17], FRI [BBHR18], WHIR [ACFY25]. Lattice-based: CMNW24 [CMNW24],
+   263→HSS24 [HSS24], Papercraft [OKC+ 25], KLNO25 [KLNO25], Greyhound [NS24], SALSAA [KLOT25] (φ = 256). For
+   264→non-lattice schemes and HSS24, times and sizes are from the original papers. For Greyhound and SALSAA, we ran
+   265→their open-source code ourselves, and due to the scheme’s memory requirement exceeding 64 GB, the experiments
+   266→marked with † could not be performed on the target machine (cf. Remark 6). A comparison of the runtimes on a
+   267→different, server-grade machine is provided in Table 8. The committed witness bit-width is 32 bits for RoKoko, matching
+   268→the bit-width reported in Greyhound [NS24]. For a conservative comparison, we use SALSAA’s original 10-bit witness
+   269→setting, which favours SALSAA. For RoKoko, we report single-threaded figures, with the parallelised commitment
+   270→runtime additionally reported in parentheses. Each figure is the median of three runs.
+   271→
+   272→                             #Zq = 226                      #Zq = 228                     #Zq = 230
+   273→        Scheme       Comm.     P      V      |π|   Comm.       P     V      |π|   Comm.    P     V       |π|
+   274→        Brakedown      36s   3.21s 0.703s 49157 150s       13s 2.56s 93767 605s 48.6s 2.96s 181948
+   275→        Ligero        39.9s 3.11s 0.196s 7256 169s       12.4s 0.402s 14383 717s 50s 0.846s 28631
+   276→        FRI           168s 185s 0.041s 740         -        -     -     -      -      -    -     -
+   277→        WHIR              210s      5.4ms 689         860s     6.1ms 770        3700s   6.6ms 848
+   278→        CMNW24          -      -       -  1546     -        -     -     -      -      -    -  5296
+   279→        HSS24             188s      1.07s 48640    -        -     -     -      -      -    -     -
+   280→        Papercraft      -      -       -     -       1593s      5.10s 18940     6986s   6.00s 29790
+   281→        KLNO25          -      -       -   2181    -        -     -   2604     -      -    -   3152
+   282→        Greyhound     4.80s 1.41s 0.42s     46 18.62s 5.41s 0.75s      53      †      †    †    53
+   283→        SALSAA        0.80s 26.46s 4.56ms 1092 3.29s 118.69s 5.58ms 1295       †      †    †  1498
+   284→        RoKoko        0.80s 1.47s 8.12ms 112 3.11s 3.17s 7.82ms 112 16.0s 9.41s 12.1ms 112
+   285→                     (0.25s)                    (0.94s)                     (4.79s)
+   286→
+   287→
+   288→
+   289→Folding schemes. Orthogonal to “monolithic” SNARKs discussed above (following the terminology
+   290→of [BCFW25]), a line of works [BC25a, FKNP24, BMNW25a, BMNW25b, NS25, BC25b, BCFW25]
+   291→have proposed post-quantum folding schemes (or accumulation schemes) that can be used as building
+   292→blocks of incrementally-verifiable computation protocols [Val08] and proof-carrying data [CT10].
+   293→Folding schemes also compile generically into SNARKs [KST21].
+   294→    Among recent quantum-safe folding schemes, several rely on lattice assumptions [BC25a,FKNP24,
+   295→NS25, BC25b]. As in our setting, the prover must prove (exact) shortness of the witness. To achieve
+   296→this, [BC25a, NS25, BC25b] apply the sumcheck protocol to prove the ℓ∞ norm bound. However, as
+   297→the communication complexity scales linearly with the range, this approach becomes impractical for
+   298→large ℓ∞ bounds and is not well-suited to prove ℓ2 norms.
+   299→
+   300→
+   301→2     Technical Overview
+   302→
+   303→We give a high-level overview of our lattice-based succinct argument construction, its applications
+   304→and its implementation.
+   305→
+   306→
+   307→2.1    Background
+   308→
+   309→Let R ∼= Z[x]/⟨Φf (x)⟩ be a cyclotomic ring and Rq = R/qR for a prime q. Works on lattice-based
+   310→succinct arguments typically consider a sufficiently expressive relation defined over Rq where the
+   311→witness is a matrix W ∈ Rmw ×r of norm at most some βw . The goal is always to progressively shrink
+   312→the witness dimension mw until it is small enough to be sent in the clear. Two intertwined challenges
+   313→must be addressed:
+   314→
+   315→                                                           6
+   316→ 1. Witness folding. The basic idea of shrinking the witness W is to fold W into Wc by some verifier
+   317→    challenge c, and then repack the witness into a smaller matrix W′ .5 The shrink factor ρ, i.e. the
+   318→    rate at which the witness dimension is reduced, is roughly the dimension of c. What distinguishes
+   319→    the semi-6 and fully-succinct settings is that, in the latter, the verifier must be able to check
+   320→    (among other constraints due to norm control) the correctness of folding in polylogarithmic time.
+   321→ 2. Norm control. While shrinking the witness dimension, we must keep the witness norm at around
+   322→    the same level, say βw . This splits into two sub-challenges. Completeness, i.e. the honest prover
+   323→    can produce a valid witness for the reduced instance. Folding W into Wc may increase the norm;
+   324→    the standard fix is to decompose the folded witness Wc, giving a net dimension reduction when
+   325→    the shrinking by c outweighs the decomposition expansion. We take this for granted and omit it
+   326→    henceforth. Extraction, i.e. the extractor can recover a valid witness for the original instance. As
+   327→    usual for lattice-based arguments, it recovers not an exact witness but a “relaxed” one (W, s)
+   328→    with a short “slack” vector s, relaxed in two ways: it only guarantees ∥W · diag(s)∥ ≤ βw′ (not
+   329→    necessarily ∥W∥ ≤ βw′ ), and the bound may be looser than the original (βw′ > βw ). This too can
+   330→    accumulate throughout composition.
+   331→
+   332→    Numerous prior works address subsets of these challenges with different trade-offs; we highlight
+   333→the most relevant.
+   334→    Regarding witness folding, [CLM23] proposes using vSIS commitments so that the witness
+   335→can be folded in a structured way that enables a polylogarithmic verifier. This method is refined
+   336→in [KLNO24b] and adopted in [KLNO25, KLOT25]. In [KLNO24b, KLNO25, KLOT25], folding the
+   337→witness by a factor ρ requires communication proportional to ρ per round, forcing them to settle on
+   338→                                                                       1/3
+   339→ρ = O(1). LaBRADOR [BS23] achieves a shrink factor of ρ = O(mw ) with essentially constant
+   340→communication per round by having the prover commit to the cross-terms instead of sending them
+   341→in the clear. However, this method of folding breaks whatever structure the original relation might
+   342→have, causing the verifier to run in time proportional to mw .
+   343→    Regarding norm control, LaBRADOR [BS23] uses random projections to eliminate the slack
+   344→vector s. However, the projection matrices are unstructured, which again causes the verifier to run
+   345→in time proportional to mw . RoK and Roll [KLNO25] adapted this technique to the fully-succinct
+   346→setting by introducing structured projections. Then, to force the extracted witness norm βw′ to be
+   347→the same as the original norm βw , SALSAA [KLOT25] adapted the sumcheck protocol to prove
+   348→the exact norm of the witness with a prover that runs in strict- (as opposed to quasi-)linear time,
+   349→improving upon the norm-check RoK of [KLNO24b].
+   350→    The main contribution of this work is to extend the committed folding technique (explored in the
+   351→literature in [BS23] or [BC25b] in the context of folding schemes) to the fully-succinct setting while
+   352→retaining all techniques introduced in [KLNO24b, KLNO25, KLOT25] for structure-preserving norm
+   353→control. This will ultimately allow us to achieve a more favourable trade-off than the state-of-the-art.
+   354→Our construction of succinct arguments is built by composing a small number of reductions of
+   355→knowledge (RoKs) which map between two relations – a committed-linear relation ΞCOM          lin   and a
+   356→                                 sum
+   357→functional-sumcheck relation ΞCOM , both defined over Rq . While either relation can be taken as the
+   358→“starting” relation, in this exposition we start from the committed-linear relation ΞCOM lin     which is
+   359→                                                                                     lin
+   360→easier to explain. In other words, we will build a succinct argument system for ΞCOM .
+   361→ 5
+   362→   Prior works typically describe this in the other way around – first repack the witness to create many columns then
+   363→   fold to fewer columns. The fold-then-split perspective is more convenient for this work.
+   364→ 6
+   365→   In the semi-succinct setting, only the proof size but not the verifier time must be polylogarithmic in the witness size.
+   366→
+   367→
+   368→                                                            7
+   369→2.2   Core Design
+   370→                      lin
+   371→At a high level, in ΞCOM   the prover’s witness wit mainly consists of a matrix W ∈ Rmw ×r satisfying
+   372→linear constraints Fi W = Hi Yi mod q for all i, where we can think of Y1 as a commitment of W.
+   373→The matrices Yi on the right-hand side are auxiliary witness components which are themselves
+   374→(recursively) committed. The main witness component W additionally satisfies a linear constraint
+   375→of the form ℓT Wr = t mod q. Intuitively, think of W as a very tall matrix, e.g. of height mw = 220 ,
+   376→while Yi is relatively much smaller. Furthermore, the witness components W, Yi must be low-norm.
+   377→The functional-sumcheck relation ΞCOM  sum has the same kind of committed low-norm witness W (with
+   378→
+   379→a single auxiliary block Y), but replaces the constraints by sumcheck claims. Linear constraints,
+   380→commitment verification and exact norm claims are all expressed in that form, which is what allows
+   381→the folding RoK below to output a single relation.
+   382→    Our goal is to iteratively reduce a large ΞCOM lin   instance into progressively smaller ones while
+   383→maintaining full-succinctness – the verifier’s runtime (and hence the proof size) must be at most
+   384→poly(λ, log |wit|) = poly(λ, log mw r). In a nutshell, each round of our protocol consists of three (fami-
+   385→lies of) RoKs: Π proj for random projection, Π fold-split for folding, splitting and encoding constraints
+   386→into functional-sumcheck claims, and Π lin for turning sumcheck claims back into linear constraints.
+   387→Symbolically, each round is a sequential composition of
+   388→
+   389→           Π fold-split ◦ Π proj : ΞCOM
+   390→                                    lin    sum
+   391→                                        → ΞCOM           and           Π lin : ΞCOM
+   392→                                                                                sum    lin
+   393→                                                                                    → ΞCOM .
+   394→
+   395→After each round, the witness dimension mw is reduced by a factor of ρ while other parameters
+   396→remain essentially unchanged. We explain these RoKs in detail.
+   397→
+   398→Committed random projection Π proj : ΞCOM lin        lin . This RoK addresses norm control : inspired
+   399→                                                → ΞCOM
+   400→                                          lin
+   401→by [KLNO25], it is a self-reduction on ΞCOM that eliminates the extraction-side norm slack. The key
+   402→idea relies on a variant of the Johnson–Lindenstrauss (JL) lemma: a random matrix J ∈ Znrp ×mrp
+   403→with small i.i.d. entries maps x ∈ Zmrp so that the ratio ∥Jx∥/∥x∥ lies in a bounded interval [αrp , βrp ]
+   404→with high probability – the norm is scaled up but tightly controlled. Naively, one would apply such
+   405→a J to the entire witness of dimension mw , but the verifier would then need to read all nrp × mw
+   406→entries of J, breaking succinctness. Instead, the prover applies a structured variant (I ⊗ J) where
+   407→J ∈ Znrp ×mrp with mrp ≪ mw : the verifier only samples the small matrix J, and the block-diagonal
+   408→structure preserves the JL guarantee on each block. The JL guarantee ensures that a short projection
+   409→image implies the original witness is short, i.e. without slack.
+   410→    We instantiate this idea in three variants, which differ in the granularity at which they project
+   411→and hence in their cost. The coarse variant (Π proj-c ) projects ring elements directly and is used while
+   412→mw ≥ mrp : it is the cheapest, since computing (I ⊗ J)W only requires additions and subtractions
+   413→of ring elements. The fine variant (Π proj-f ) projects their coefficients via the trace-dual embedding
+   414→(used once mw drops below mrp , relaxing the dimension requirement to mrp | φmw ), and then batches
+   415→the projection and lifts to constraints over Rq : the consistency between W and its projection is
+   416→a statement over Zq , which is batched with random Zq challenges into nbat constraints over Rq ,
+   417→so that the round communicates nbat additional ring elements. The lift-and-batch variant (Π proj-fl )
+   418→generalises the fine variant by exploiting the chain of intermediate subfields Fqa of Rq to gradually
+   419→lift the projection image instead of immediately lifting to Rq , which removes the overhead of nbat
+   420→ring elements and yields further asymptotic improvements. All variants share the same (I ⊗ J)
+   421→structure, and – crucially – the prover commits to the (gadget-decomposed) projection image rather
+   422→than sending it in the clear.
+   423→
+   424→                                                    8
+   425→     Whereas coarse projections are similar to the random “structured” projection protocol in [KLNO25]
+   426→aside from operating on different input and output relations, the fine and lift-and-batch variants
+   427→introduce additional structure not present in the corresponding variant from [KLNO25]. This
+   428→structure serves to keep the verifier efficient as the projection matrix grows wider – a necessity
+   429→when matching the compression effect of larger shrinking factors ρ. In [KLNO25], the fine and
+   430→lift-and-batch projection image (presented jointly as “unstructured”) has linear communication in
+   431→both the projection height and the witness width, and is sent in the clear; in our setting, widening
+   432→the witness and increasing the projection height to accommodate a large ρ would make this image
+   433→prohibitively large for uncompressed transmission. Committing to the image reduces that overhead.
+   434→
+   435→Committed folding and splitting Π fold-split : ΞCOM
+   436→                                                  lin      sum . This RoK primarily addresses witness
+   437→                                                       → ΞCOM
+   438→folding but also encodes all resulting constraints into sumcheck claims. The protocol starts from a
+   439→committed-linear instance of width r and proceeds in four steps. First, the prover commits to Fklin W,
+   440→where the rows of Fklin are the left vectors ℓj : this turns the constraints ℓTj Wrj = tj into linear
+   441→constraints of the same shape as the others, so that all of them are folded uniformly. Second, the
+   442→verifier samples a low-norm challenge c ∈ C r and the prover folds the witness to Wc, whose gadget
+   443→decomposition is packed together with all committed auxiliary data (Yi , xi ) into a single vector w:  b
+   444→by linearity, Fi (Wc) = (Hi Yi )c, so all folded constraints involve w only, and one sumcheck over the
+   445→                                                                      b
+   446→multilinear extension of w b covers all of them at once. Third, the prover computes the norm witness
+   447→v = ⟨w,   b whose trace is the squared canonical norm of w:
+   448→       b w⟩,                                                  b the verifier checks the bound on trace(v),
+   449→and the sumcheck proves that v is the correct inner product, which yields an exact norm check
+   450→without slack. Fourth, the prover reshapes w     b to a new witness matrix U of width r′ and derives a
+   451→commitment FU = Gℓ′′ Y mod q under a vSIS key F (with Y being further recursively committed).
+   452→This makes the output an instance of the same committed form, ready for the next round of
+   453→folding. Rather than returning a new ΞCOM    lin    with additional constraints, the second part of this
+   454→RoK encodes all constraints – folded linear constraints, commitment well-formedness, right/global
+   455→linear constraints and the exact norm check via v – into sumcheck claims while preserving succinct
+   456→verification (in a similar manner to [KLOT25]). Due to the specific structure of the linear constraints
+   457→arising in our protocol – they are either Kronecker row-tensors (originating from vSIS commitment
+   458→keys) or sparse matrices (from auxiliary constraints) – the resulting multilinear extensions are
+   459→efficiently evaluable, enabling a succinct sumcheck verifier.
+   460→
+   461→Linearisation with sumcheck Π lin : ΞCOM
+   462→                                     sum → Ξ lin . This RoK completes each round by re-encoding
+   463→                                              COM
+   464→the sumcheck claims as linear constraints, enabling the next iteration. It executes the sumcheck
+   465→protocol as a subroutine to reduce all accumulated sumcheck claims into evaluation claims on the
+   466→committed witness. In our construction, it retains the constraint matrices (com, F, H) from the
+   467→original instance and linearises the sumcheck claims into structured linear constraints, yielding a
+   468→        lin
+   469→fresh ΞCOM   instance with mw 7→ mw /ρ7 . Our key optimisation is subfield batching: while combining
+   470→multiple sumcheck claims via a random linear combination is standard, we additionally apply a
+   471→random Fqa -linear map Φ : Rq → Fqa (for a subfield Fqa ⊆ Rq ) that collapses the φ/a components of
+   472→the Fqa -decomposition of Rq into one, so that each sumcheck round communicates only a single Fqa
+   473→element. This keeps verifier work and communication low. This can be viewed as a generalisation and
+   474→7                  lin
+   475→    The “fresh” ΞCOM    instance does not shrink mw by the full folding width r, because the witness accumulates
+   476→    additional data over the course of the composition – projection images, auxiliary recursive-commitment information,
+   477→    gadget-decomposition overhead, etc. The parameter ρ therefore captures the effective compression factor per
+   478→    complete round, which is smaller than the number of columns r folded in Π fold-split .
+   479→
+   480→
+   481→                                                           9
+   482→formalisation of batching over NTT slots introduced in [BC25a, KLOT25, GLLO26] and orthogonal
+   483→sumcheck-over-coefficients techniques from [NOZ26, HMZ25].
+   484→
+   485→2.3     Putting Everything Together
+   486→Composition and asymptotics. The full composition proceeds in two phases: first, a coarse chain
+   487→(Π lin ◦ Π fold-split ◦ Π proj-c ) is iterated while mw ≥ mrp ; once mw drops below mrp , the fine chain
+   488→(Π lin ◦ Π fold-split ◦ Π proj-f ) takes over for the remaining rounds8 . With ρ = λ, the full composition
+   489→yields a prover runtime of O(mw ) Rq operations (linear-time), verifier runtime of O(λ3 log mw / log λ),
+   490→and proof size of O(λ log3 mw / log2 λ) bits. Compared to SALSAA [KLOT25], which is effectively
+   491→limited to ρ = O(1) because their verifier complexity grows linearly in ρ, we reduce proof size by a
+   492→factor of log λ while matching prover complexity, at the cost of a theoretically larger verifier runtime.
+   493→
+   494→Applications. A succinct argument for ΞCOM lin immediately yields a polynomial commitment scheme
+   495→(PCS): the polynomial evaluation claim p(v) = t is a linear constraint ℓT Wr = t mod q on the
+   496→committed coefficient matrix W, which is already a ΞCOMlin  instance (as noted above). If we instead
+   497→                            sum
+   498→take the more expressive ΞCOM as the starting relation, we obtain a SNARK for R1CS: the R1CS
+   499→                                                                            sum , though the verifier
+   500→constraints are naturally expressible as sumcheck constraints captured by ΞCOM
+   501→must additionally evaluate multilinear extensions on public R1CS matrices.
+   502→
+   503→Implementation. We implement RoKoko in Rust, targeting almost-splitting power-of-two cyclotomic
+   504→rings (Rq ∼= (Fq2 )φ/2 , with φ = 128, q ≈ 250 ). Almost-splitting rings (residue degree e = 2) provide
+   505→NTT slots Fq2 large enough for sufficient per-round soundness while admitting efficient incomplete-
+   506→NTT arithmetic, with ring multiplication reducing to φ/2 independent quadratic products. We
+   507→release the ring arithmetic layer as an independent open-source library. On top of it, we build a
+   508→sumcheck module with a generic interface for expressing sumcheck relations, and instantiate it to
+   509→deliver a PCS. For a PCS over 226 coefficients in Zq (single-threaded, λ = 128, κ = 2−100 ), our
+   510→implementation produces a 112 KB proof in 3.38 s (commit + prove), with verification in 8.12 ms.
+   511→Compared to SALSAA [KLOT25], this is a ∼10× reduction in proof size and ∼8× faster proving,
+   512→while verification is ∼1.8× slower; compared to Greyhound [NS24], we offer ∼52× faster verification
+   513→(reaching ∼90× on the largest instance run on the server-grade machine; see Table 8).
+   514→
+   515→2.4     Paper Organisation
+   516→We define the relations ΞCOM lin        sum in Section 4. The committed random projection protocols
+   517→                                  and ΞCOM
+   518→Π  proj-c and Π proj-f are presented in Section 5, committed folding Π fold-split in Section 6, and the
+   519→linearisation-with-sumcheck protocol Π lin in Section 7. The composition of these RoKs and the
+   520→asymptotic analysis are given in Section 8, and implementation details with experimental results in
+   521→Section 9.
+   522→
+   523→3     Preliminaries
+   524→
+   525→For n ∈ N, we write [n] := {0, 1, . . . , n − 1}, i.e. we count from 0. For vectors, we typically
+   526→use lowercase bold letters, e.g. v, and for matrices we use uppercase bold letters, e.g. M. For
+   527→8
+   528→    In asymptotic analysis in Section 8, we use lift-and-batch projections for the second chain, which allows us to achieve
+   529→    a better asymptotic proof size. This variant is more complex and may not yield practical improvements for the
+   530→    parameters we consider.
+   531→
+   532→
+   533→                                                            10
+   534→a matrix M, we write vec(M) for the (column-style) vectorisation of M. Conversely, we write
+   535→V = reshapek (v) to reshape a vector into a k-column matrix, such that vec(V) = v, assuming
+   536→compatible dimensions. Recall that for matrices A, B, C with compatible dimensions the mixed-
+   537→product property vec(ABC) = (CT ⊗ A) · vec(B) holds, where ⊗ denotes the Kronecker product. We
+   538→use A∥B to denote the horizontal concatenation of matrices A and B with the same number of rows.
+   539→We use (A, B) to denote the vertical concatenation of matrices A and B with the same number of
+   540→columns. We write ei for the i-th unit vector. For vectors v0 , . . . , vk−1 of the same dimension, we
+   541→write matrix-from-rows((vj )j∈[k] ) for the matrix whose j-th row is vTj , and M[j, :] for the j-th row
+   542→of a matrix M. We use A • B to denote the row-wise tensor product of matrices A and B with
+   543→the same number of rows. To highlight the row-tensor structure of a matrix A = A0 • . . . • Ak−1
+   544→                                                      ⊗k                 ⊗k
+   545→defined over ring R (resp., Rq ), we write A ∈ Rn×2 (resp., Rn×2   q        ). We write minpowtwo(x) to
+   546→denote the smallest power of two greater than or equal to x.
+   547→
+   548→3.1    Algebraic Number Theory
+   549→Throughout, we let K = Q(ζ) be a cyclotomic field with conductor f and degree φ = φ(f) and
+   550→R = OK its ring of integers. We write trace = traceK/Q for the field trace and, by abuse of notation,
+   551→the natural adaptation of the map from Rq to Zq . If M is a matrix then trace(M) denotes taking
+   552→trace entry-wise. For a prime modulus q ∈ N, we write Rq := R/qR. We denote by R× and R×       q the
+   553→sets of units in R and Rq respectively.
+   554→
+   555→Embeddings. We endow R with two geometries via the coefficient embedding cf b : R → Zφ (for
+   556→a given basis b) and the canonical embeddingPσ : K → Cφ (of K). Specifically, for a given Z-
+   557→basis b = (bi )i∈[φ] of R and an element x = i∈[φ] xi bi ∈ R, we write cf b (x) := (xi )i∈[φ] and
+   558→σ(x) := (σj (x))j∈[φ] , where σj ∈ Gal(K/Q). We define the powerful basis of R as b = (1,Q           ζ, . . . , ζ φ−1 )
+   559→for prime-power conductor f. The basis generalises to the composite conductor f = i∈[k] fei i for
+   560→                                                                     
+   561→                                     N                        φ(f )−1
+   562→prime fi via tensor product, b = i∈[k] 1, ζfi , . . . , ζfi i           . If b is the standard powerful basis, we
+   563→may omit b from the subscript of cf b . We extend the notation of cf b and σ naturally to vectors, i.e.
+   564→if x = (xi )Ti∈[m] ∈ Rm , then cf b (x) := (cf b (xi ))Ti∈[m] and σ(x) := (σ(xi ))Ti∈[m] are defined as vectors
+   565→in Zmφ (resp. Cmφ ) obtained by stacking the individual cf b (xi ) (resp. σ(xi )). For matrices, we define
+   566→cf b and σ entry-wise so that cf b is a map from Rn×m to Znφ×m and σ is a map from Rn×m to
+   567→Cnφ×m . The inverse of cf b is denoted by cf −1   b , and we write cf
+   568→                                                                            −1
+   569→                                                                               when b is the powerful basis. We
+   570→write · for the conjugation automorphism of K, the norm-preserving involution induced by ζ 7→ ζ −1
+   571→(equivalently, complex conjugation under σ), applied entry-wise to vectors and matrices.
+   572→
+   573→Lemma 1 (Dual modulo prime [KLNO25, Lemma 1]). Let q be an unramified prime, i.e.
+   574→q ∤ f, and R be the ring of integers of a cyclotomic field K. For any Z-basis b = (bi )i∈[φ] ∈ Rφ
+   575→of R, there exists b∨ = (b∨             φ                      ∨
+   576→                            i )i∈[φ] ∈ R such that trace(bi · bj ) = δi,j mod q, where δi,j denotes the
+   577→Kronecker delta, for all i, j ∈ [φ].
+   578→
+   579→   While considering the coefficient embedding with respect to the vector b∨ , when b is a powerful
+   580→basis, we may omit b∨ and write only cf ∨ .
+   581→
+   582→Norms and Norm Conversion. The coefficient ℓp -norm and canonical ℓp -norm of an element x ∈ R are
+   583→defined as ∥x∥p := ∥cf b (x)∥p and ∥x∥σ,p := ∥σ(x)∥p respectively, where ∥·∥p is the standard ℓp -norm
+   584→on vectors. We extend the definitions naturally to vectors x ∈ Rm by defining ∥x∥p := ∥cf b (x)∥p
+   585→
+   586→                                                          11
+   587→and ∥x∥σ,p := ∥σ(x)∥p . For a matrix B = (b0 , . . . , bm−1 ) ∈ Rn×m , we define ∥B∥p = maxi∈[m] ∥bi ∥p
+   588→and similarly for ∥B∥σ,p . By default, we use “norm” to refer to the ℓ2 -norm over the coefficient
+   589→embedding, i.e. ∥x∥ := ∥cf b (x)∥2 .
+   590→
+   591→Lemma 2 (Relations between norms ( [KLNO24a, Lemma 1])). Let x ∈ K = Q(ζf ) and
+   592→φ = φ(f). Let f̂ be f if f is odd and f/2 if it is even; let rad(f) be the radical
+   593→                                                                            q        (i.e. the product of all
+   594→                                              q
+   595→                                                 rad(f)
+   596→primes dividing f). Then we have ∥x∥2 ≤            f ∥x∥σ,2 and ∥x∥σ,2 ≤      f̂ · ∥x∥2 .
+   597→
+   598→Operator norm and expansion factor. Fix the coefficient embedding cf above. For c ∈ Rq , let
+   599→∥c∥op := supt∈Rq \{0} ∥t·c∥
+   600→                       ∥t∥ . For some set S ⊆ Rq , we let γS := maxc∈S ∥c∥op .
+
+[showing lines 1-600 of 3689; use offset=601 with limit to continue reading]

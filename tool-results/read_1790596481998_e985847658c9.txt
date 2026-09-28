@@ -1,0 +1,702 @@
+   701→ Π sum : Ξn̂,n,µ,r,r
+   702→ sum
+   703→ out ,β
+   704→ mle
+   705→ → Ξn̂,n,µ,r,β,t
+   706→
+   707→ P((h, s, H, F, Y), W) V(h, s, H, F, Y)
+   708→ 1: f0 := MLE[W] ∈ Rrq [xµ ] u ←$ Fqe
+   709→ 2: f1 := MLE[W] ∈ Rrq [xµ ] uT := (ui )i∈[rout ·φ/e]
+   710→
+   711→ 3: f˜ := uT · CRT(h(f0 , f1 )) mod q ∈ Fqe [xµ ] uT a0 := uT · CRT(s) mod q
+   712→
+   713→ 4: for i ∈ [µ] : // r<i := (r0 , . . . , ri−1 )
+   714→
+   715→ gi (x) ∈ Fqe [x] ?
+   716→ X X
+   717→ 5: gi (x) := f˜(r<i , x, zi ) mod q ai = gi (z) mod q
+   718→ zi ∈{0,1}µ−i−1 z∈{0,1}
+   719→
+   720→ 6: ri ri ←$ Fqe
+   721→
+   722→ ai+1 := gi (ri ) mod q
+   723→ 7: v0 := f0 (r) mod q
+   724→
+   725→ 8: v1 := f0 (r) mod q (vj )j∈[2] ∈ Rr×2
+   726→ q b := h(v0 , v1 )
+   727→
+   728→ ?
+   729→ 9: aµ = uT · CRT(b) mod q
+   730→
+   731→ .............................................. . ..............................................
+   732→
+   733→ 10 : rT := (CRT−1 (1φ/e · ri )T )i∈[µ] , r0 := r, r1 := r
+   734→ mle
+   735→ 11 : (H, F, Y, (rj , vj )j∈[2] , W) ∈ Ξn̂,n,µ,r,β,t
+   736→
+   737→ Fig. 2. Π sum : RoK from Ξ sum to Ξ mle .
+   738→
+   739→4.2 Π sum : Ξ sum → Ξ mle
+   740→We adapt the sumcheck protocol over a finite field to the Rq setting, and describe it as a RoK from the sumcheck
+   741→relation Ξ sum to the multilinear extension relation Ξ mle . Relation Ξ sum concerns an rout -dimensional vector h
+   742→ 2r r
+   743→of polynomials in 2r variables with coefficients in Rq [xµ ], inducing a function h : (Rq [xµ ]) → (Rq [xµ ]) out .
+   744→The sumcheck is defined for the function f := h(f0 , f1 ), where f0 , f1 ∈ Rrq [xµ ] are the multilinear extensions
+   745→of the matrices W and W, respectively. The relation Ξ sum states that z∈{0,1}µ f (z) = s.
+   746→ P
+   747→
+   748→Definition 4.3 (Ξ sum : Sumcheck Relation).
+   749→  
+   750→ 
+   751→  ((h, s, H, F, Y), W) : 
+   752→ 
+   753→  
+   754→  lin-⊗ 
+   755→ 
+   756→ 
+   757→ 
+   758→  ((H, F, Y), W) ∈ Ξ 
+   759→ 
+   760→ 
+   761→ 
+   762→  s ∈ Rrout
+   763→  
+   764→ 
+   765→ sum-⊗ q
+   766→ Ξn̂,n,µ̃,r,rout ,β := ,
+   767→ 
+   768→ 
+   769→  h ∈ ((Rq [xµ ])[y2r ])rout 
+   770→ 
+   771→ 
+   772→ 
+   773→  X 
+   774→ 
+   775→ h(MLE[W], MLE[W])(z) = s mod q 
+   776→ 
+   777→  
+   778→ 
+   779→  
+   780→ 
+   781→  µ
+   782→ 
+   783→ z∈{0,1}
+   784→
+   785→where W is the complex conjugate of W. The function h is a vector of rout polynomials in 2r variables with
+   786→coefficients in Rq [xµ ]. We write h(ν0 , . . . , ν2r−1 ) for their coordinate-wise evaluation at the inputs (νj )j∈[2r] .
+   787→Ξ sum- is identical to Ξ sum-⊗ except that the linear relation Ξ lin-⊗ is replaced with Ξ lin- . When irrelevant,
+   788→we will simply write Ξ sum to refer to both Ξ sum-⊗ and Ξ sum- .
+   789→ 2r r
+   790→Lemma 4.4. Adopt Setting 3.4, and let h : (Rq [xµ ]) → (Rq [xµ ]) out be a function defined in the sumcheck
+   791→relation Ξ sum . Let δh and δ̂h be the upper-bounds on the total degrees and the individual degrees of (hi )i∈[rout ] ,
+   792→
+   793→ 12
+   794→respectively. The RoK Π sum shown in Fig. 2 is a perfectly correct reduction of knowledge for:
+   795→ sum mle
+   796→ Ξn̂,n,µ,r,r out ,β
+   797→ → Ξn̂,n,µ,r,β,t=2 .
+   798→
+   799→It is knowledge sound with knowledge-error κ = rout ·φ/e−1+µ
+   800→ qe
+   801→ δ̂h
+   802→ for
+   803→ sum sis mle
+   804→ Ξn̂,n,µ,r,r ′ ∪ Ξn µ ′ ← Ξn̂,n,µ,r,β ′ ,t=2 .
+   805→ out ,β com ,2 ,2β
+   806→
+   807→The communication cost is (δ̂h + 1)µe log q + 2r log |Rq |. Prover runs in O(δh mr) ring operations. The verifier
+   808→performs O(µδ̂h ) operations over Fqe for the round checks, plus the evaluation of h(v0 , v1 ).
+   809→
+   810→Proof. Correctness: For correctness, we observe that
+   811→ X
+   812→ ai = gi−1 (ri−1 ) = f˜(r0 , ..., ri−1 , zi−1 )
+   813→ zi−1 ∈{0,1}µ−i
+   814→ X X
+   815→ = f˜(r0 , ..., ri−1 , z, zi )
+   816→ z∈{0,1} zi ∈{0,1}µ−i−1
+   817→ X
+   818→ = gi (z) mod q
+   819→ z∈{0,1}
+   820→
+   821→Further, f˜(r0 , . . . , rµ−1 ) = uT · CRT(h(f0 (r), f1 (r)))
+   822→= uT · CRT(h(f0 (r), f0 (r))) = uT · CRT(h(v0 , v1 )) mod q. The second equality holds since complex conjugation
+   823→is a ring automorphism commuting with polynomial evaluation, so f1 (r) = MLE[W](r) = MLE[W](r) = f0 (r).
+   824→Knowledge Soundness: Without loss of generality, suppose P ∗ is deterministic and succeeds with a prob-
+   825→ability ϵ. E runs P ∗ on a random challenge (u, r). If the prover fails, E aborts. On success, E obtains
+   826→(W, (gi )i∈[µ] , (vj )j∈[2] ) satisfying:
+   827→
+   828→ ((H, F, Y), W) ∈ Ξ lin , ∥W∥σ,2 ≤ β ′ ,
+   829→ f0 (r) = v0 mod q, f0 (r) = v1 mod q,
+   830→ X
+   831→ uT · CRT(s) = g0 (z) mod q
+   832→ z∈{0,1}
+   833→ X
+   834→ gi (ri ) = gi+1 (z) mod q ∀ i ∈ [µ − 1]
+   835→ z∈{0,1}
+   836→
+   837→ aµ = gµ−1 (rµ−1 ) = uT · CRT(h(v0 , v1 )) mod q.
+   838→
+   839→If W satisfies Ξ sum , the extractor outputs W and terminates. Otherwise, it re-runs P ∗ on fresh challenges
+   840→(u′ , r′ ) until it obtains a second accepting transcript (W′ , (gi′ )i∈[µ] , (vj′ )j∈[2] ) satisfying
+   841→
+   842→ ((H, F, Y), W′ ) ∈ Ξ lin , ∥W′ ∥σ,2 ≤ β ′ ,
+   843→ f0′ (r′ ) = v0′ mod q, f0′ (r′ ) = v1′ mod q where f0′ := MLE[W′ ],
+   844→ T
+   845→ X
+   846→ u′ · CRT(s) = g0′ (z) mod q
+   847→ z∈{0,1}
+   848→ X
+   849→ gi′ (ri′ ) = ′
+   850→ gi+1 (z) mod q ∀ i ∈ [µ − 1]
+   851→ z∈{0,1}
+   852→ T
+   853→ a′µ = gµ−1
+   854→ ′ ′
+   855→ (rµ−1 ) = u′ · CRT(h(v0′ , v′ 1 )) mod q.
+   856→
+   857→ If W′ ̸= W, then any non-zero column of W′ − W is a solution w to Fw = 0 mod q , and hence
+   858→(Fcom , w) ∈ Ξnsiscom ,2µ ,2β ′ .
+   859→ Consider the case W′ = W, while ((h, s, (H, F, Y)), W) ∈ / Ξ sum . We show that, under the conditions
+   860→specified above, the second transcript is accepting with probability at most κ/ϵ. By the final check by the
+   861→
+   862→ 13
+   863→verifier, f˜(r′ ) = a′µ is satisfied. The proof is by induction on µ. For µ = 1, the prover’s only message specifies a
+   864→degree δ̂h univariate polynomial g0′ (x). If g0′ (x) ̸= z0 ∈{0,1}µ−1 f˜(x, z0 ) mod q, then because any two distinct
+   865→ P
+   866→
+   867→degree-δ̂h univariate polynomials over the finite field Fqe can agree on at most δ̂h inputs, the final check is
+   868→accepted with probability at most δ̂h /(ϵq e ) over the choice of r0′ . By induction and a union bound over the µ
+   869→rounds, the sumcheck protocol has knowledge soundness error at most κ0 /ϵ for κ0 := µδ̂h /q e .
+   870→ As established, except for the probability κ0 /ϵ, z∈{0,1}µ f˜(z) = a′0 = u′ · CRT(s) mod q.
+   871→ P T
+   872→
+   873→ Thus, since now we assume:
+   874→
+   875→  X 
+   876→ T T
+   877→ u′ · CRT h(f0 , f1 )(z) = u′ · CRT(s) mod q. (2)
+   878→ z∈{0,1}µ
+   879→
+   880→ P
+   881→ If it does not hold that z∈{0,1}µ h(f0 , f1 )(z) = s, Eq. (2) would fail except for the probability at most
+   882→ e
+   883→ P κ1 := (rout · φ/e − 1)/q by the Schwartz-Zippel lemma over Fqe in Lemma 3.1. Assuming now
+   884→κ1 /ϵ, where
+   885→that s = z∈{0,1}µ h(f0 , f1 )(z) mod q, we yield a contradiction with a supposition that
+   886→ sum
+   887→ (h, s, (H, F, Y), W) ∈/ Ξn̂,n,µ,r,r out ,β
+   888→ ′.
+   889→
+   890→ We conclude that E outputs either:
+   891→ sum
+   892→ – W satisfying the Ξn̂,n,µ,r,r out ,β
+   893→ relation, or
+   894→ sis
+   895→ – w satisfying (Fcom , w) ∈ Ξncom ,2µ ,2β ′
+   896→
+   897→with a probability
+   898→
+   899→ κ0 + κ1 µδ̂h + rout φ/e − 1
+   900→ ϵ(1 − ) = ϵ − (κ0 + κ1 ) = ϵ − = ϵ − κ.
+   901→ ϵ qe
+   902→
+   903→ Expected runtime of E. Let ϵ > 0 be the success probability of P ∗ on a random challenge (u, r). The
+   904→extractor strategy is: (i) Run P ∗ on a fresh challenge; if unsuccessful, abort. Otherwise, record the successful
+   905→transcript. (ii) Rewind and repeat with fresh challenges until a second accepting transcript. The number of
+   906→prover invocations follows E[T ] = (1 − ϵ) + ϵ · 1 + 1ϵ = 2, so the extractor runs in expected polynomial time.
+   907→ 
+   908→
+   909→ Runtime and Communication Cost: Computing f0 and f1 can be performed in O(mr) ring operations.
+   910→Further, computing f˜ is performed in O(δh mr) time, employing regular Horner’s method. The sumcheck part
+   911→is optimised using dynamic programming techniques that store and update partially evaluated polynomials
+   912→across rounds, which reduces the total cost to O(m) [Tha13,XZZ+ 19,CBBZ23]. Therefore, the total prover
+   913→time complexity is O(δh mr) ring operations. The verifier performs O(µδ̂h ) operations over Fqe for the round
+   914→checks, and additionally computes the evaluation h(v0 , v1 ).
+   915→ The communication includes sending degree δ̂h polynomials (gi )i∈[µ] represented by δ̂h + 1 coefficients,
+   916→and two vectors of length r. In total, the communication cost is (δ̂h + 1)µe log q + 2r log |Rq |.
+   917→
+   918→Remark 4.5. If the function h does not involve the variables y1 , i.e. h(f0 , f1 ) does not depend on f1 , then the
+   919→conjugate evaluation claim can be dropped from Π sum : the prover does not send v1 , and the protocol outputs
+   920→ mle
+   921→a Ξn̂,n,µ,r,β,t=1 instance carrying only the claim MLE[W](r) = v0 . The knowledge error is unchanged, and
+   922→the communication cost drops to (δ̂h + 1)µe log q + r log |Rq |.
+   923→
+   924→4.3 Π batch : Ξ lin → Ξ sum
+   925→ +
+   926→We describe our improved batching technique Π batch that reduces Ξ lin to Ξ lin itself and serves as a drop-in
+   927→ batch-
+   928→replacement for the batching RoK of [KLNO24,KLNO25], which we denote by Π klno24 . After aggregating the
+   929→bottom rows with a random vector c, we express the resulting constraint cT HFW = cT Y mod q as a sumcheck
+   930→claim. The RoK Π sum reduces this claim to the evaluation claims MLE[W](r) = v0 and MLE[W](r) = v1 ,
+   931→which replace the aggregated constraint in the output relation, while the evaluation MLE[(cT HF)T ](r) is
+   932→ +
+   933→computed efficiently by the verifier. We provide a helper RoK Π batch , from which the RoK Π batch is built.
+   934→
+   935→ 14
+   936→ Π batch : Ξn̂,n,µ,r,β
+   937→ lin sum
+   938→ → Ξn,n,µ,r,r,β
+   939→
+   940→ P((H, F, Y), W) V(H, F, Y)
+   941→
+   942→ 1: c c ←$ Rq
+   943→
+   944→ ...........................................
+   945→
+   946→ 2: c := (1, c, . . . , cn̂−n )T
+   947→  
+   948→ H
+   949→  
+   950→ 3: H= , Y= Y Y , sT := cT Y
+   951→ H
+   952→  
+   953→ 4: h(y0 , y1 ) := MLE (cT HF)T · y0
+   954→ sum
+   955→  
+   956→ 5: h, s, H, F, Y , W ∈ Ξn,n,µ,r,r,β
+   957→
+   958→ Fig. 3. Π batch : A reduction from Ξ lin to Ξ sum .
+   959→
+   960→Lemma 4.6. Adopt Setting 3.4. The RoK Π batch shown in Fig. 3 is a perfectly correct reduction of knowledge
+   961→for
+   962→ lin sum
+   963→ Ξn̂,n,µ,r,β → Ξn,n,µ,r,r,β .
+   964→It is knowledge sound with its error κ = (n̂ − n)/q e for
+   965→ Ξnsiscom ,2µ ,2β ′ ∪ Ξn̂,n,µ,r,β
+   966→ lin sum
+   967→ ′ ← Ξn,n,µ,r,r,β ′ .
+   968→
+   969→The communication cost is 0. The prover runs in O(n(m + r)) ring operations and the verifier runtime is
+   970→O(nr) ring operations.
+   971→Proof. Correctness: First, it clearly holds that:
+   972→ lin
+   973→  
+   974→ H, F, Y , W ∈ Ξn,n,µ,r,β ,
+   975→ X X
+   976→ h(MLE[W])(z) = MLE[(cT HF)T ](z) · MLE[W](z).
+   977→ z∈{0,1}µ z∈{0,1}µ
+   978→
+   979→Let hT := cT HF ∈ R1×m
+   980→ q and (wi )i∈[r] ∈ W.
+   981→Since
+   982→  T
+   983→ X
+   984→ (hT · W)T =  hj · (wi,j )i∈[r] 
+   985→ j∈[m]
+   986→ X
+   987→ = hj · ((wi,j )i∈[r] )T
+   988→ j∈[m]
+   989→ X
+   990→ = MLE[h](z) · MLE[W](z),
+   991→ z∈{0,1}µ
+   992→
+   993→ k
+   994→ P
+   995→where j = k∈[µ] zk · 2 , the following holds:
+   996→ X
+   997→ s = (cT HFW)T = (hT · W)T = MLE[(cT HF)T ](z) · MLE[W](z).
+   998→ z∈{0,1}µ
+   999→
+  1000→ Knowledge Soundness:
+  1001→ Without loss of generality, suppose P ∗ is deterministic and succeeds with a probability ϵ. E runs P ∗ on a
+  1002→random challenge c. If the prover fails, E aborts. On success, by the definition of the relation Ξ sum , E obtains
+  1003→ sum
+  1004→(h, s, (H, F, Y), W) ∈ Ξn,n,µ,r,r,β ′ satisfying:
+  1005→
+  1006→ X
+  1007→ lin
+  1008→ ((H, F, Y), W) ∈ Ξn,n,µ,r,β ′, s= MLE[(cT HF)T ](z) · MLE[W](z).
+  1009→ z∈{0,1}µ
+  1010→
+  1011→ 15
+  1012→ lin ∗
+  1013→ If ((H, F, Y), W) satisfies Ξn̂,n,µ,r,β ′ , the extractor outputs W and terminates. Otherwise, it re-runs P
+  1014→
+  1015→on fresh challenges c′ until it obtains the second accepting transcript (h′ , s′ , (H, F, Y), W′ ) ∈ Ξn,n,µ,r,r,β
+  1016→ sum
+  1017→ ′,
+  1018→ ′ ′
+  1019→where h denotes the function h derived from c , satisfying:
+  1020→ X
+  1021→ ((H, F, Y), W′ ) ∈ Ξn,n,µ,r,β
+  1022→ lin
+  1023→ ′, s′ = MLE[(c′T HF)T ](z) · MLE[W′ ](z).
+  1024→ z∈{0,1}µ
+  1025→
+  1026→From both transcripts, we obtain HFW = HFW′ ↔ HF(W′ − W) = 0. The extractor checks if W′ = ̸ W.
+  1027→If so, let w be any non-zero column of W′ − W, then Fw = 0 so E extracts (Fcom , w) ∈ Ξnsiscom ,2µ ,2β ′ and
+  1028→terminates.
+  1029→ Consider the case W′ = W and HFW ̸= Y. From the correctness analysis and the conditions of the
+  1030→extracted witnesses,
+  1031→ (s′T = ) c′T Y = c′T HFW,
+  1032→
+  1033→ but this, due to the Schwartz-Zippel lemma and since c′ is independent of the first transcript, happens
+  1034→only with a probability of at most κ := n̂ − n/qe .
+  1035→ Expected runtime of E. As in Lemma 4.4, Π batch admits an expected polynomial-time knowledge extractor
+  1036→when the prover P ∗ succeeds with probability ϵ.
+  1037→ Prover and Verifier Runtime. Both prover and verifier compute s, which takes O((n̂ − n)r) = O(nr) since
+  1038→n̂ − n ≤ n. This is the only computation of the verifier, which hence runs in O(nr). The prover additionally
+  1039→materialises the polynomial h by computing cT HF, which takes O(nm).
+  1040→
+  1041→ +
+  1042→ We combine Π batch with Π mle-⊗ and Π sum to obtain a batching protocol Π batch from Ξ lin to Ξ lin .
+  1043→ +
+  1044→Corollary 4.7. Adopt Setting 3.4. We define the new batching RoK Π batch := Π mle-⊗ ◦ Π sum ◦ Π batch . The
+  1045→ +
+  1046→RoK Π batch is perfectly correct for
+  1047→ lin lin
+  1048→ Ξn̂,n,µ,r,β → Ξn+1,n+1,µ,r,β
+  1049→
+  1050→and knowledge sound with its error n̂−n+rφ/e−1+2µ
+  1051→ qe for
+  1052→
+  1053→ Ξnsiscom ,2µ ,2β ′ ∪ Ξn̂,n,µ,r,β
+  1054→ lin lin
+  1055→ ′ ← Ξn+1,n+1,µ,r,β ′
+  1056→
+  1057→The communication cost is 3µe log q + r log |Rq |. The prover runtime is the sum of the runtime of Π sum and
+  1058→that of the helper RoK Π batch and is O(m(n + r) + nr) ring operations. The verifier runtime is O(n(µ + r + n))
+  1059→ring operations.
+  1060→
+  1061→Proof. The correctness and knowledge-soundness follow from the correctness of each composed RoKs described
+  1062→in Lemmas 4.2, 4.4 and 4.6. The function h does not involve the variables y1 , so by Remark 4.5 the RoK Π sum
+  1063→omits v1 and outputs a single evaluation claim, and Π mle appends a single row. This yields the output relation
+  1064→ lin
+  1065→Ξn+1,n+1,µ,r,β and the communication cost 3µe log q + r log |Rq |. The communication complexity is derived
+  1066→from the complexity of the Π sum RoK and the fact that the individual degree of h(f0 , f1 ) = MLE[(cT HF)T ] · f0
+  1067→is δ̂h = 2. The prover runtime is O (mr + n(m + r)) = O (m(n + r) + nr). The verifier of Π batch computes
+  1068→sT = cT Y in O (nr). By Lemma 4.4, the verifier of Π sum performs O(µδ̂h ) = O(µ) operations over Fqe for the
+  1069→round checks, plus the evaluation of h(v0 , v1 ). The O(µ) term is absorbed by the O(nµ) term below. We
+  1070→ 1×n 
+  1071→have MLE[(cT HF)T ](r). Let aT := cT H ∈ Rq . The term cT H can be computed in O n2 ring operations.
+  1072→Then MLE[(aT F)T ](r) = aT Fe r := k∈[µ] (1 − rk , rk )T . Since each row f Tj of F has a tensor structure,
+  1073→ N
+  1074→ r, where e
+  1075→ T
+  1076→evaluating f j · e
+  1077→ r costs O(µ) by the mixed-product property. Computing the entire F · e r thus costs O(nµ),
+  1078→and the inner product with a adds O(n). Since the output has r columns, the total verifier runtime is
+  1079→O (µn + n(r + n)) = O (n(µ + r + n)). Π mle contributes O(1) and does not affect the asymptotic cost.
+  1080→
+  1081→ 16
+  1082→ Π norm : Ξn̂,n,µ,r,β
+  1083→ lin sum
+  1084→ → Ξn̂,n,µ,r,r,β
+  1085→
+  1086→ P((H, F, Y), W) V(H, F, Y)
+  1087→ 1: parse W = (wi )i∈[r]
+  1088→
+  1089→ 2: tT := (⟨wi , wi ⟩)i∈[r] t tT := (t0 , . . . , tr−1 )
+  1090→
+  1091→ ?
+  1092→ 3: for i ∈ [r] : Trace (ti ) ≤ β 2
+  1093→
+  1094→ . .. . . .. . .. . . .. . .. . .. . . .. . .. . . .. . ... .. . . .. . .. . . .. . .. . . .. . .. . . .. . .. . .
+  1095→
+  1096→ 4: h := y0 ⊙ y1
+  1097→ sum
+  1098→ 5: ((h, t, H, F, Y), W) ∈ Ξn̂,n,µ,r,r out ,β
+  1099→
+  1100→ Fig. 4. Π norm : a RoK from Ξ lin to Ξ sum .
+  1101→
+  1102→4.4 Π norm : Ξ lin → Ξ sum
+  1103→This section designs the normcheck RoK Π norm+ , which reduces a Ξ lin relation to a Ξ lin relation with a tight
+  1104→ norm-
+  1105→norm bound of the witness in the extraction direction. We denote the normcheck of [KLNO24] by Π klno24 .
+  1106→ The reduction is split into three steps for simplicity: (i) We first provide the RoK Π norm from Ξ lin to Ξ sum .
+  1107→(ii) Afterwards, a Ξ sum instance is reduced to a Ξ mle instance with the RoK Π sum described in Lemma 4.4,
+  1108→which is further reduced to a Ξ lin instance with the reduction in Lemma 4.2. (iii) Finally, the bottom rows F
+  1109→ +
+  1110→of F are batched by the RoK Π batch in Corollary 4.7.
+  1111→
+  1112→Lemma 4.8. Adopt Setting 3.4. Let h ∈ (Rrq [xµ ])[y0 , y1 ] be a function defined as h(y0 , y1 ) = y0 ⊙ y1 . The
+  1113→RoK Π norm shown in Fig. 4 is a perfectly correct reduction of knowledge for
+  1114→ lin sum
+  1115→ Ξn̂,n,µ,r,β → Ξn̂,n,µ,r,r,β ,
+  1116→
+  1117→and is knowledge sound with knowledge error κ = 0 for
+  1118→ lin sum
+  1119→ Ξn̂,n,µ,r,β ← Ξn̂,n,µ,r,r,β ′.
+  1120→
+  1121→The communication cost is r log |Rq |. The prover runs in O(r · m) and the verifier in O(r) ring operations.
+  1122→ lin
+  1123→Proof. Correctness: Consider an instance ((H, F, Y), W) ∈ Ξn̂,n,µ,r,β . Let W := (wi )i∈[r] . We begin by
+  1124→ P  P P
+  1125→observing that Trace(ti ) = Trace (⟨wi , wi ⟩) = Trace j∈[m] wj,i · wj,i = j∈[m] σ∈Gal(R/Z) σ(wj,i · wj,i ) =
+  1126→ 2
+  1127→∥wi ∥σ,2 ≤ β 2 . The inequality holds since ∥W∥σ,2 ≤ β by the definition of Ξ lin , and hence the verifier’s check
+  1128→Trace(ti ) ≤ β 2 succeeds. Since t := (⟨wi , wi ⟩)i∈[r] , we have that ((h, t, H, F, Y), W) ∈P
+  1129→ Ξ sum .
+  1130→ sum
+  1131→ Knowledge Soundness: By the definition of Ξ and the function h, we have z∈{0,1}µ (MLE[W] ⊙
+  1132→ P
+  1133→MLE[W])(z) = t mod q. Equivalently, ti = j∈[m] wj,i · wj,i and
+  1134→  
+  1135→ X
+  1136→ Trace(ti ) = Trace  wj,i · wj,i  mod q,
+  1137→ j∈[m]
+  1138→
+  1139→ 2
+  1140→which also holds without mod q since Trace( j∈[m] wj,i · wj,i ) = ∥wi ∥σ,2 ≤ β ′2 < q/2 by Setting 3.4, using
+  1141→ P
+  1142→
+  1143→the norm bound ∥W∥σ,2 ≤ β ′ of the extracted witness. Since the verifier’s check Trace(ti ) ≤ β 2 passes,
+  1144→  
+  1145→ X X X 2
+  1146→ β 2 ≥ Trace  wj,i · wj,i  = σ(wj,i · wj,i ) = ∥wi ∥σ,2 ,
+  1147→ j∈[m] j∈[m] σ∈Gal(R/Z)
+  1148→
+  1149→ 17
+  1150→ lin
+  1151→i.e. ∥W∥σ,2 ≤ β, which together with HFW = Y mod q implies ((H, F, Y), W) ∈ Ξn̂,n,µ,r,β .
+  1152→ Efficiency. The communication consists of the vector t, i.e. r elements of Rq . The prover computes the r
+  1153→inner products ⟨wi , wi ⟩ of length-m vectors, which takes O(rm) ring operations. The verifier receives t ∈ Rrq
+  1154→and checks Trace(ti ) ≤ β 2 for each i ∈ [r].
+  1155→
+  1156→ The following is immediate from Lemmas 4.2, 4.4 and 4.8 and Corollary 4.7.
+  1157→ +
+  1158→Corollary 4.9. Adopt Setting 3.4. We define the new normcheck RoK Π norm+ := Π batch ◦Π mle ◦Π sum ◦Π norm .
+  1159→The RoK Π norm+ is perfectly correct for:
+  1160→ lin-⊗ lin-⊗
+  1161→ Ξn̂,n,µ,r,β → Ξn+1,n+1,µ,r,β .
+  1162→
+  1163→It is knowledge sound with knowledge-error κ = n̂ − n + 2(rφ/e + 2µ)/qe for:
+  1164→ lin-⊗ lin-⊗
+  1165→ Ξn̂,n,µ,r,β ∪ Ξnsiscom ,2µ ,2β ′ ← Ξn+1,n+1,µ,r,β ′.
+  1166→
+  1167→Π norm+ natively works in the case where Ξ lin-⊗ is replaced with Ξ lin- . The communication cost is 6µe log q +
+  1168→4r log |Rq |. Prover runs in O(m(n + r) + nr) ring operations. The verifier runtime is O(n(µ + r + n)) ring
+  1169→operations.
+  1170→
+  1171→Proof. The correctness and the knowledge soundness holds by the correctness and the knowledge soundness
+  1172→ + +
+  1173→of each RoK. The knowledge error is from Π sum and Π batch . The RoK Π batch is applied after Π mle has
+  1174→appended two rows, so its input has n̂ + 2 output rows. Hence
+  1175→κ = (rφ/e−1+2µ)+(n̂+2−n+rφ/e−1+2µ)
+  1176→ qe = n̂−n+2(rφ/e+2µ)
+  1177→ qe . The communication cost is the sum of the communica-
+  1178→ +
+  1179→tion costs from Π norm , Π sum , and Π batch , which is r log |Rq |+(3µe log q+2r log |Rq |)+(3µe log q+r log |Rq |) =
+  1180→6µe log q + 4r log |Rq |. The prover runtime of each RoK is bounded by either O(r · m) or O(m(n + r) + nr).
+  1181→The verifier of Π norm runs in O(r) by Lemma 4.8. By Lemma 4.4, the verifier of Π sum performs O(µδ̂h ) = O(µ)
+  1182→operations over Fqe for the round checks, plus the evaluation of h(v0 , v1 ). Since h = y0 ⊙ y1 , the evaluation
+  1183→ +
+  1184→costs O(r), and the O(µ) term is absorbed by the O(nµ) term below. The verifier of Π batch , by Corollary 4.7,
+  1185→runs in O(n(µ + r + n)). Hence the total verifier runtime is O(n(µ + r + n)).
+  1186→
+  1187→4.5 Π bin : Ξ bin → Ξ sum
+  1188→
+  1189→This section focuses on designing the binariness check RoK Π bin+ for the binariness relation Ξ bin . The
+  1190→binariness check RoK reduces a Ξ bin relation to a Ξ lin relation, where Ξ bin is almost identical to Ξ lin except
+  1191→that the witness must have binary coefficients, i.e. cf(wj,i ) ∈ {0, 1}φ for all entries wj,i of W. The binariness
+  1192→check is built upon the sumcheck RoK, analogously to the normcheck of Section 4.4.
+  1193→
+  1194→Definition 4.10 (Ξ bin : Binariness Relation).
+  1195→  
+  1196→  ((H, F, Y), W) : 
+  1197→  
+  1198→ bin lin
+  1199→ Ξn̂,n,µ,r,β := ((H, F, Y), W) ∈ Ξn̂,n,µ,r,β .
+  1200→  
+  1201→ φ
+  1202→ ∀j∈[m],i∈[r] cf(wj,i ) ∈ {0, 1}
+  1203→ 
+  1204→
+  1205→ The reduction relies on the following lemma.
+  1206→
+  1207→Lemma 4.11. Let R = Z[ζf ] be a cyclotomic ring for f = 2k for some k ∈ N and φ = f/2. For w, v ∈ R, we
+  1208→have that ⟨cf(w), cf(v)⟩ = Trace(w · v)/φ.
+  1209→
+  1210→Proof. Let w = i∈[φ] wi ζ i and v = i∈[φ] vi ζ i . Then w = i∈[φ] wi ζ −i and w · v = i,j wi vj ζ j−i . Hence
+  1211→ P P P P
+  1212→
+  1213→Trace(w · v) = i,j wi vj Trace(ζ j−i ). Since f = 2k is a power of two, the minimal polynomial of ζ is X φ + 1,
+  1214→ P
+  1215→
+  1216→so Trace(ζ 0 ) = φ and Trace(ζ ℓ ) = 0 for 0 < |ℓ| < φ.PBecause i, j ∈ [φ], for i ̸= j we have 0 < |j − i| < φ, and
+  1217→hence Trace(ζ j−i ) = 0. Therefore Trace(w · v) = φ i wi vi .
+  1218→
+  1219→ 18
+  1220→ Π bin : Ξn̂,n,µ,r,β
+  1221→ bin sum
+  1222→ → Ξn̂,n,µ,r,r,β
+  1223→
+  1224→ P((H, F, Y), W) V(H, F, Y)
+  1225→ 1: parse W = (wi )i∈[r]
+  1226→
+  1227→ 2: tT := (⟨wi , 1◦ − wi ⟩)i∈[r] t tT := (t0 , . . . , tr−1 )
+  1228→
+  1229→ ?
+  1230→ 3: for i ∈ [r] : Trace (ti ) = 0
+  1231→
+  1232→ .....................................................................
+  1233→
+  1234→ 4: h := y1 ⊙ (1◦ − y0 )
+  1235→ 5: ((h, t, H, F, Y), W) ∈ Ξ sum
+  1236→
+  1237→ Fig. 5. Π bin : a RoK from Ξ bin to Ξ sum .
+  1238→
+  1239→ Let 1◦ := k∈[φ] ζ k ∈ R denote the ring element whose coefficients (w.r.t. the basis (ζ k )k∈[φ] ) are all 1, and
+  1240→ P
+  1241→
+  1242→let 1◦ ∈ Rm be the vector with every entry equal to 1◦ . For a column wi of W, define ti := ⟨wi , 1◦ − wi ⟩. Then
+  1243→ mφ ◦
+  1244→ P i ) = 0 if and only if cf(wi ) ∈ {0, 1} . This follows from Lemma 4.11, which gives Trace(w · (1 − w)) =
+  1245→Trace(t
+  1246→φ k cf(w)k (1 − cf(w)k ) for w ∈ R. Since the coefficients are integers, each summand a(1 − a) is nonpositive
+  1247→with equality if and only if a ∈ {0, 1}, so the sum vanishes if and only if every coefficient of wi lies in {0, 1}.
+  1248→ The reduction is split into three steps, mirroring the normcheck: (i) We first provide the reduction from
+  1249→Ξ bin to Ξ sum . (ii) Afterwards, a Ξ sum instance is reduced to a Ξ mle instance with the RoK Π sum described in
+  1250→Lemma 4.4, which is further reduced to a Ξ lin with the reduction in Lemma 4.2. (iii) Finally, the bottom
+  1251→ +
+  1252→rows F of F are batched by the RoK Π batch in Corollary 4.7. Π bin is a RoK from Ξ bin to Ξ sum . We provide
+  1253→a formal lemma in Lemma 4.12.
+  1254→
+  1255→Lemma 4.12. Adopt Setting 3.4 andPlet R = Z[ζf ] be a power-of-two cyclotomic ring with f = 2k for
+  1256→some k ∈ N and φ = f/2. Let 1◦ := k∈[φ] ζ k ∈ R and let h ∈ (Rrq [xµ ])[y0 , y1 ] be a function defined as
+  1257→h(y0 , y1 ) = y1 ⊙ (1◦ − y0 ). The RoK Π bin shown in Fig. 5 is perfectly correct and knowledge sound for
+  1258→ bin sum
+  1259→ Ξn̂,n,µ,r,β ↔ Ξn̂,n,µ,r,r,β ,
+  1260→
+  1261→where the sumcheck concerns the function h. The communication cost is r log |Rq |. The prover runs in O(r · m)
+  1262→and the verifier in O(r) ring operations.
+  1263→
+  1264→Proof. Correctness: Consider an instance ((H, F, Y), W) ∈ Ξ bin . Let W := (wi )i∈[r] . Since cf(W) ∈
+  1265→{0, 1}mφ×r , write each entry as w k
+  1266→ P
+  1267→ j,i = k cf(wj,i )k ζ with cf(wj,i )k ∈ {0, 1}. By Lemma 4.11, we ob-
+  1268→ ◦
+  1269→ P
+  1270→tain Trace(w j,i · (1 − wj,i )) = φ k cf(wj,i )k (1 − cf(wj,i )k ) = 0, since every cf(wj,i )k ∈ {0, 1}. Therefore
+  1271→Trace(ti ) = j∈[m] Trace(wj,i · (1◦ − wj,i )) = 0. Since t := (⟨wi , 1◦ − wi ⟩)i∈[r] , we have that
+  1272→ P
+  1273→
+  1274→((h, t, H, F, Y), W) ∈ Ξ sum .
+  1275→ Knowledge Soundness: By the definition of Ξ sum and the function h, we have z∈{0,1}µ (MLE[W] ⊙
+  1276→ P
+  1277→
+  1278→(1◦ − MLE[W]))(z) = t mod q. Equivalently, ti = ◦
+  1279→ P
+  1280→ j∈[m] wj,i · (1 − wj,i ) mod q. Write each entry as
+  1281→wj,i = k cf(wj,i )k ζ k . By Lemma 4.11, we obtain
+  1282→ P
+  1283→
+  1284→ X
+  1285→ Trace(ti ) = Trace(wj,i · (1◦ − wj,i ))
+  1286→ j∈[m]
+  1287→ X X
+  1288→ =φ cf(wj,i )k (1 − cf(wj,i )k ) mod q.
+  1289→ j∈[m] k∈[φ]
+  1290→
+  1291→This also holds over Z (without mod q), since |a(1 − a)| ≤ 2a2 for all a ∈ Z, and hence |Trace(ti )| ≤
+  1292→ 2 2 2
+  1293→2φ j,k cf(wj,i )2k = 2φ∥cf(wi )∥2 ≤ 2rad(f)·φ · ∥wi ∥σ,2 = 2∥wi ∥σ,2 ≤ 2β 2 < q/2, where the second inequality
+  1294→ P
+  1295→ f
+  1296→
+  1297→ 19
+  1298→ q
+  1299→uses ∥cf(·)∥2 ≤ rad(f)
+  1300→ f · ∥·∥σ,2 (cf. Lemma 2 of [KLNO25]), the following equality uses rad(f) = 2 and φ = f/2
+  1301→from the power-of-two hypothesis, and the last inequality is Setting 3.4. Now, for any integer a, the quantity
+  1302→a(1−a) ≤ 0 with equality if and only if a ∈ {0, 1}. Since Trace(ti ) = 0 and each term cf(wj,i )k (1−cf(wj,i )k ) ≤ 0,
+  1303→we conclude that cf(wj,i )k ∈ {0, 1} for all j, k, and hence ((H, F, Y), W) ∈ Ξ bin .
+  1304→ Efficiency claims are analogous to Lemma 4.8.
+  1305→ The following corollary is immediate from Lemmas 4.2, 4.4 and 4.12 and Corollary 4.7, analogously to the
+  1306→normcheck corollary (Corollary 4.9).
+  1307→
+  1308→Corollary 4.13. Adopt Setting 3.4 and let R = Z[ζf ] be a power-of-two cyclotomic ring with f = 2k for
+  1309→ +
+  1310→some k ∈ N and φ = f/2. Let Π bin+ := Π batch ◦ Π mle ◦ Π sum ◦ Π bin . Π bin+ is a perfectly correct reduction of
+  1311→knowledge for:
+  1312→ bin lin
+  1313→ Ξn̂,n,µ,r,β → Ξn+1,n+1,µ,r,β .
+  1314→It is knowledge sound with knowledge-error κ = n̂ − n + 2(rφ/e + 2µ)/qe for
+  1315→ bin sis lin
+  1316→ Ξn̂,n,µ,r,β ′ ∪ Ξn µ ′ ← Ξn+1,n+1,µ,r,β ′
+  1317→ com ,2 ,2β
+  1318→
+  1319→The communication cost is 6µe log q + 4r log |Rq |. Prover runs in O(m(n + r) + nr) ring operations. The
+  1320→verifier runtime is O(n(µ + r + n)) ring operations.
+  1321→
+  1322→Proof. The correctness and the knowledge soundness hold by the correctness and the knowledge soundness
+  1323→ + +
+  1324→of each RoK. The knowledge error is from Π sum and Π batch . The RoK Π batch is applied after Π mle has
+  1325→appended two rows, so its input has n̂ + 2 output rows. Hence
+  1326→κ = (rφ/e−1+2µ)+(n̂+2−n+rφ/e−1+2µ)
+  1327→ qe = n̂−n+2(rφ/e+2µ)
+  1328→ qe . The communication cost is the sum of the communica-
+  1329→ +
+  1330→tion costs from Π bin , Π sum , and Π batch , which is r log |Rq |+(3µe log q +2r log |Rq |)+(3µe log q +r log |Rq |) =
+  1331→6µe log q + 4r log |Rq |. The prover runtime of each RoK is bounded by either O(r · m) or O(m(n + r) + nr).
+  1332→The verifier of Π bin runs in O(r) by Lemma 4.12. By Lemma 4.4, the verifier of Π sum performs O(µδ̂h ) = O(µ)
+  1333→operations over Fqe for the round checks, plus the evaluation of h(v0 , v1 ). Since h = y1 ⊙ (1◦ − y0 ), the
+  1334→ +
+  1335→evaluation costs O(r), and the O(µ) term is absorbed by the O(nµ) term below. The verifier of Π batch , by
+  1336→Corollary 4.7, runs in O(n(µ + r + n)). Hence the total verifier runtime is O(n(µ + r + n)).
+  1337→
+  1338→4.6 Π :Ξ → Ξ sum
+  1339→We design the staircase check RoK Π + for the staircase relation Ξ . The RoK Π + reduces a Ξ relation
+  1340→ lin
+  1341→to a Ξ  relation, where Ξ extends Ξ lin with a staircase constraint involving matrices A and B, shorthanded
+  1342→ A
+  1343→by .
+  1344→ B K
+  1345→
+  1346→Definition 4.14 (Ξ : Staircase Relation).
+  1347→  
+  1348→ 
+  1349→  ((H, F, Y, A, B, Y0, , Y1, ), W) : 
+  1350→ 
+  1351→  
+  1352→ lin
+  1353→ ((H, F, Y), W) ∈ Ξ
+  1354→ 
+  1355→  
+  1356→ 
+  1357→ 
+  1358→ 
+  1359→  n̂,n,µ,r,β 
+  1360→ 
+  1361→ 
+  1362→ m ×n m ×r
+  1363→  
+  1364→ Ξm ,n ,n̂,n,µ,r,β := A, B ∈ R q Y 0, , Y 1, ∈ Rq .
+  1365→  
+  1366→ Y
+  1367→ 
+  1368→  
+  1369→ 0,
+  1370→   
+  1371→ A
+  1372→ 
+  1373→  
+  1374→ 
+  1375→ · W =  0  mod q
+  1376→ 
+  1377→  
+  1378→ 
+  1379→ B m/n
+  1380→ 
+  1381→  
+  1382→ 
+  1383→ Y1,
+  1384→  
+  1385→
+  1386→ The reduction relies on the following observation. Let K := m/n denote the number of column blocks
+  1387→and assume K and n are powers of 2. Parsing W into K row-blocks Wj ∈ Rn ×r , the staircase constraint
+  1388→reads AW0 = Y0, , BWj−1 + AWj = 0 for j ∈ [1 : K] and BWK−1 = Y1, . Batching all (K + 1) · m rows
+  1389→with consecutive powers of a single challenge c ←$ Rq and grouping by column block, the contribution of Wj
+  1390→is weighted by cj·m dT for the same batched row d, so the batched constraint is the single relation
+  1391→
+  1392→ (p ⊗ d)T W = s,
+  1393→
+  1394→ 20
+  1395→ sum
+  1396→ Π : Ξm ,n ,n̂,n,µ,r,β → Ξn̂,n,µ,r,r,β
+  1397→
+  1398→ P((H, F, Y, A, B, Y0, , Y1, ), W) V(H, F, Y, A, B, Y0, , Y1, )
+  1399→ 1: parse W as (Wj )j∈[K] blocks, K := m/n
+  1400→
+
+[showing lines 701-1400 of 3383; use offset=1401 with limit to continue reading]

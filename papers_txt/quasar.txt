@@ -1,0 +1,2829 @@
+      Quasar: Sublinear Multi-Cast Commitment
+         Mixing in Recursive Accumulation
+
+             Tianyu Zheng1 , Shang Gao1 , Sherman S. M. Chow2 ,
+                          Yu Guo3 , and Bin Xiao1
+        1
+          Dept. of Comp., The Hong Kong Polytechnic University, Hong Kong
+    tian-yu.zheng@connect.polyu.hk, {shang-jason.gao, b.xiao}@polyu.edu.hk
+       2
+         Dept. of Info. Engg., The Chinese University of Hong Kong, Hong Kong
+                                smchow@ie.cuhk.edu.hk
+                            3
+                               SECBIT Labs, Suzhou, China
+                                   yu.guo@secbit.io
+
+
+
+        Abstract. Sitting at the core of folding-based recursion, multi-instance
+        accumulation still forces the recursive verifier to combine ℓ committed ob-
+        jects, incurring Θ(ℓ) circuit-expensive commitment random linear com-
+        binations (CRCs). Here ℓ denotes the number of instances accumulated
+        per step, and a CRC is an in-circuit random linear combination of com-
+        mitments. Eliminating the linear-in-ℓ CRC overhead is the central chal-
+        lenge, and we address it with Quasar, reducing in-circuit CRCs from Θ(ℓ)
+        to O(1) per step, while the unavoidable cost of reading and processing
+        public inputs remains linear as usual. Realizing constant-commitment
+        accumulation, Quasar’s multi-cast reduction commits to a union poly-
+        nomial and verifies a random partial evaluation, yielding a reduced in-
+        stance with O(1) commitments. Moreover, composing multi-cast with
+        a standard 2-to-1 folding reduction yields a multi-instance accumula-
+        tion scheme whose verifier uses O(log ℓ) field work and O(1) CRCs per
+        step. Across instantiations with suitable polynomial commitments, our
+        instantiation supports linear-time accumulation provers, plausible post-
+        quantum security, and parallelizable proving at each step. Not only does
+        Quasar keep CRCs constant in ℓ, it also yields a multi-instance incre-
+        mentally verifiable computation with lower recursion overhead.
+
+        Keywords: Zero-Knowledge Proofs · Recursive Arguments · Accumu-
+        lation Schemes.
+
+
+1     Introduction
+
+Succinct Non-interactive ARguments of Knowledge (SNARKs) enable succinct
+verification of computations across applications, including zero-knowledge vir-
+tual machines [2,46], verifiable databases [58,59], and verifiable inference [45,53].
+In a monolithic SNARK [50], the prover records the full execution trace and
+proves correctness end-to-end using a general-purpose proof system [37,9,33].
+As computations scale, monolithic proving remains costly despite substantial
+prover-side optimizations [6,50,13,35,34]. For example, proving a zkVM execu-
+tion, e.g., EVM or RISC-V [38,39] expressed as an arithmetic circuit with 226
+gates can require around 1 hour of proving time [24] and more than 200 GB of
+memory [54]. These costs motivate recursive and incremental approaches that
+avoid materializing the full trace at once, but they introduce a separate per-step
+verification bottleneck addressed by this work.
+
+IVC and PCD. A standard alternative is to partition a large computation into
+smaller chunks and represent each chunk as a predicate. The prover produces a
+proof for each predicate instance and then recursively “squeezes” these proofs
+into a single one. This avoids holding the full trace at once and enables incre-
+mental progress. The sequential setting is incrementally verifiable computation
+(IVC) [55], and its generalization to directed acyclic graphs is proof-carrying data
+(PCD) [26]. Compared to monolithic SNARKs, IVC/PCD reduces peak mem-
+ory, supports streaming proof production, and can enable prover parallelism in
+several constructions (discussed below).
+
+Accumulation and folding schemes. Traditional IVC/PCD via recursive compo-
+sition invokes a SNARK at each step to verify the previous step’s proof [10,9,28],
+which requires embedding a full SNARK verifier into the next-step proving cir-
+cuit and is typically impractical [28,25]. Accumulation (or folding) schemes in-
+stead aggregate per-step proofs into a succinct accumulator [14,19,18,12,42], so
+the recursive circuit verifies only an accumulation step. A final decider checks
+the terminal accumulator in time independent of the number of steps, enabling
+practical recursion.
+
+1.1    Problem Statements
+While IVC/PCD improves memory scalability, the per-step recursive circuit can
+still dominate cost. In Nova-style frameworks [42,43,41], the per-step circuit typ-
+ically splits into two components.
+• The trace for computing a new predicate input (the computation overhead ).
+• The trace for verifying the accumulation between the new proof and the run-
+  ning accumulator (the recursion overhead )4 .
+Empirically, for R1CS, the recursion overhead for a single accumulation can
+consume around 10,000 constraints [44], which is 2–3× larger than the compu-
+tation overhead [49]. This cost limits the number of recursive steps that can be
+instantiated in practice.
+    A common optimization, used in ProtoGalaxy [30] and in PCD solutions [18,50],
+is to process multiple predicate instances or accumulators per recursive step. We
+refer to these as multiple accumulation schemes of arity ℓ, following prior termi-
+nology [41,23]. This reduces the number of recursive steps by a factor of roughly ℓ,
+but it does not necessarily reduce the dominant cost inside each recursive step.
+4
+    In practice, the recursion overhead also encompasses auxiliary operations such as
+    hashing of instances.
+
+
+                                          2
+Fig. 1: Workflows of IVC and PCD. The grey block denotes the predicate φ for
+each computation chunk. In IVC (left), φ is embedded into a single recursive
+circuit across steps. In PCD (right), φ is embedded into a tree of recursive
+circuits that can expose parallelism.
+
+
+    The core issue is that recursion overhead is often dominated by commitment
+random linear combination (CRC) operations, which are circuit-inefficient. For
+curve-based commitments, CRC typically includes non-native elliptic-curve oper-
+ations. For code-based commitments, CRC typically includes Merkle path verifi-
+cation and related hashing. Existing multiple accumulation schemes [19,18,12,42,23]
+require the verifier to perform Θ(ℓ) CRC operations per step.
+    Formally, let CRC denote the cost of computing one random linear combina-
+tion C := r1 · C1 + r2 · C2 . To prove N computation chunks, an IVC protocol
+employing a 2-accumulation (left of Figure 1) requires N steps and a total of
+N · t CRC operations in the recursive circuits, where t is the maximum number of
+commitments in an accumulator. Thus, though multiple accumulation (right of
+Figure 1) reduces the number of recursive steps, it does not remove the dominant
+in-circuit CRC work, since existing ℓ-ary verifiers still incur Θ(ℓ) such operations
+per step. In recursive settings where CRC is circuit-expensive, this leaves the
+dominant recursion overhead asymptotically unchanged in ℓ.
+    These considerations motivate the following question.
+
+Motivation. Can we design a multiple accumulation scheme whose recursive
+verifier uses a constant number of in-circuit CRC operations in the arity ℓ?
+Equivalently, can we make the dominant in-circuit commitment-combination
+cost scale as O(1) in ℓ, while treating the linear cost of reading and processing
+public inputs as orthogonal and unchanged?
+
+1.2   Contributions
+Quasar is a multiple accumulation scheme whose recursive verifier uses a con-
+stant number of CRC operations in the arity ℓ. Quasar answers the above question
+by keeping the dominant in-circuit commitment-combination cost constant in ℓ.
+
+New interactive oracle reduction. Building on oracle batching [22], we iden-
+tify a recursion-friendly reduction interface—multi-cast—that compresses ℓ in-
+
+
+                                        3
+stances into a constant-commitment derived instance suitable for folding. At a
+high level, multi-cast reduction transforms ℓ input instances into a single derived
+instance while ensuring that the output instance-proof pair contains only a con-
+stant number of polynomial commitments. Technically, Quasar achieves this via
+an efficient polynomial partial evaluation check that lets the verifier validate the
+required commitment relations with O(1) CRC operations, plus O(log ℓ) field
+work. This targets the dominant circuit cost in recursive settings, while leav-
+ing the linear cost of reading and processing public inputs unchanged. The key
+structural point is that multi-cast outputs a constant-size committed interface
+that is preserved under folding, rather than merely providing a batched check
+over ℓ instances.
+
+Accumulation schemes. We propose a framework for constructing accumu-
+lation schemes from (i) a multi-cast reduction and (ii) a 2-to-1 reduction for
+special-sound protocols (SPS) [16]. Main Theorem 1 formalizes the composition
+and isolates the ℓ-dependence to O(log ℓ) explicit field work, while CRC remains
+independent of ℓ. For simplicity, we focus on the setting where each recursive
+step takes ℓ NARK (Non-interactive ARguments of Knowledge) proofs and one
+running accumulator as inputs. In this setting, each fold level uses O(1) CRC
+operations and the O(log ℓ) levels contribute O(log ℓ) explicit field work, ex-
+cluding linear public-input processing. Since our construction is phrased over
+polynomial oracles, it is compatible with a variety of polynomial commitments,
+and can achieve plausible post-quantum security based on cryptographic hash
+functions or lattice-based assumptions [22,11].
+
+Instantiations and applications. To demonstrate applicability, we construct
+a multi-instance IVC protocol that, at each step, takes ℓ predicate instances and
+a single running accumulator as inputs. We instantiate the underlying polyno-
+mial commitment scheme (PCS) using linear-time encodable codes [35,56], and
+employ a NARK for multivariate Plonkish constraint systems [24], yielding a
+post-quantum IVC with a linear-time prover. Although this multi-instance IVC
+does not have the tree structure of PCD [50], it enables parallel execution of the
+accumulation prover within each step. Applying the same technique to PCD can
+reduce the recursion costs by a constant factor; however, achieving a PCD with
+an accumulation verifier that is sublinear in ℓ in the strong sense remains open.
+
+1.3   Performance Analysis
+We analyze the recursive verification cost by separating (i) in-circuit commit-
+ment combinations and (ii) public-input processing. Throughout, ℓ denotes the
+accumulation arity. We write CRC for one in-circuit commitment random linear
+combination, e.g., computing C := r1 · C1 + r2 · C2 . In curve-based instantiations,
+CRC induces non-native elliptic-curve arithmetic inside the recursive circuit. In
+hash-based instantiations, CRC induces hashing work, e.g., Merkle-path verifi-
+cation. Quasar reduces the in-circuit CRC cost from Θ(ℓ) to O(1) per recursive
+
+                                         4
+step, while public-input processing remains linear in ℓ. Equivalently, Quasar
+moves the ℓ-dependence from in-circuit CRC work to O(log ℓ) random-oracle /
+sum-check work and PCS evaluation checks.
+    We summarize asymptotic verifier costs in Table 1, and we instantiate them
+by compiling accumulation verifiers into recursive circuits under a fixed toolchain
+with matched parameters. To estimate recursion overhead in IVC, we compile
+Quasar and representative baselines into recursive circuits in both R1CS and
+Plonkish using the Nova toolchain [49], and we report recursive circuit size (con-
+straint counts) and related resource footprints across arities in Table 2. The
+results show that Quasar reduces recursion overhead relative to prior multi-
+accumulation schemes, including the DL-based HyperNova [41] and the code-
+based Arc [22], consistent with the cost shift above. Methodology and parameters
+appear in Appendix C.
+
+Hash versus commitment combinations. Table 1 reports verifier cost in terms of
+random-oracle queries (denoted by RO) and group operations (denoted by G).
+For curve-based schemes, we interpret G as the in-circuit elliptic-curve operations
+induced by CRC. For ProtoGalaxy, the O(ℓ · d) group-operation term can be
+organized as a multi-scalar multiplication (MSM), e.g., via Pippenger, which
+improves native constant factors but does not remove the ℓ dependence. Inside
+recursion, that ℓ dependence remains circuit-expensive. Quasar instead keeps the
+number of in-circuit CRC operations O(1) in ℓ and pays O(log ℓ) RO work from
+sum-check. Table 2 instantiates this asymptotic distinction with compiled-circuit
+footprints under a fixed toolchain across arities.
+
+
+1.4   Scope
+
+Although folding/accumulation schemes enable practical IVC/PCD, key deploy-
+ment requirements remain orthogonal to the bottleneck studied here. First,
+zkVM-style workloads (e.g., EVM, RISC-V, Wasm) often yield heterogeneous
+circuits, whereas many recursive systems are optimized for more uniform con-
+straint structures. Second, many IVC/PCD constructions target a single prover
+and do not provide per-step zero-knowledge for intermediate witnesses (e.g.,
+Nova [42]), limiting use in privacy-sensitive settings.
+    Our goal is to introduce a clean primitive (multi-cast reduction) and a mod-
+ular composition theorem that yields O(1) CRC per recursive step. Accordingly,
+our evaluation is scoped to validating the circuit footprint implied by the cost
+model, rather than end-to-end system throughput. In particular, we measure
+constraint counts (and related resource usage) for the accumulation-verification
+logic embedded in a recursive circuit under varying arity, and we treat these
+results as sanity-check datapoints for the predicted ℓ-dependence. We do not
+report end-to-end multi-instance IVC performance, since a complete prototype
+would require a recursive wrapper together with an in-circuit verifier for each
+PCS backend, and these engineering components are orthogonal to the primi-
+tive and composition results established here. Concrete wall-clock performance
+
+                                        5
+            Table 1: Comparisons between multi-accumulation schemes
+Schemes             Constraints       PCS type         PQ                Verifier cost
+ProtoGalaxy [30]       Plonkish      Elliptic curves   No        O(1)Hash, O(ℓ · d)G
+HyperNova [41]           CCS         Elliptic curves   No        O(log n)Hash, O(ℓ)G
+Quasar (curve)         Plonkish      Elliptic curves   No        O(log ℓ)Hash, O(1)G
+                                                                         λ
+Arc [21]                R1CS            RS codes       Yes    O(ℓ · log(1/ρ)  · log n)Hash
+                                                                         λ
+WARP [17]              PESAT          Linear codes     Yes    O(ℓ · log(1/ρ)  · log n)Hash
+                                                                  λ
+Quasar (code)          Plonkish       Linear codes     Yes O( log(1/ρ) · (log n + log ℓ))Hash
+
+     Hash: hash query, G: group operation, ℓ: number of input predicate instances (arity),
+     d: maximum degree of the relation, n: witness length, ρ: code rate.
+
+
+Table 2: Concrete recursion overhead for multi-instance IVC with varying arity
+                            R1CS                                          Plonkish
+Arity      HyperNova [41]         Quasar           Ratio    Arc [22]        Quasar        Ratio
+                       13                 13                        17               17
+    2          1.48 × 2           1.48 × 2         1.01×    1.13 × 2        1.13 × 2      1.01×
+    4          1.91 × 213         1.61 × 213       1.09×    1.09 × 218      1.14 × 217    1.91×
+    8          1.32 × 214         1.75 × 213       1.51×    1.62 × 218      1.16 × 217    2.79×
+    16         1.98 × 214         1.88 × 213       2.10×    1.08 × 219      1.18 × 217    3.66×
+    32         1.62 × 215         1.01 × 214       3.21×    1.34 × 219      1.20 × 217    4.49×
+     Ratio: dividing the performance of the comparison scheme (HyperNova or Arc) by
+     that of Quasar.
+
+
+remains backend-dependent, since Quasar trades ℓ-dependent CRC group oper-
+ations for O(log ℓ) random-oracle / sum-check work and PCS evaluation checks.
+
+2        Technical Overview
+We summarize the recursive-accumulation bottleneck and how Quasar removes
+it. The core idea is to use polynomial partial evaluation so that ℓ instances can
+be mixed while committing to only O(1) objects. We then present Quasar as the
+composition of two primitives, a multi-cast reduction and a 2-to-1 reduction,
+which together yield a multi-instance accumulation scheme. Finally, we outline
+the resulting multi-instance IVC application.
+
+2.1      New Accumulation Idea
+We begin by recalling the accumulation bottleneck. An accumulation scheme
+incrementally aggregates NP statements into a succinct accumulator such that
+each step is efficiently verifiable. Most practical constructions [14,19,18,12,42,16]
+rely on homomorphic commitments, which force the verifier to compute random
+linear combinations of commitments. In recursive settings, these commitment
+random linear combination (CRC) operations are typically circuit-inefficient.
+
+
+                                               6
+Baseline: linear commitment combination. Consider ℓ instance-witness pairs
+{(xk , wk )}k∈[ℓ] satisfying a relation R, and the goal of producing one accumu-
+lated pair (x, w) for a (possibly different) relation R′ . A standard reduction com-
+mits to each witness and then combines commitments with random coefficients.
+Abstractly, for a homomorphic commitment scheme (Setup, Commit, Open), a
+minimal three-move template is:
+
+• The prover computes Ck ← Commit(ck, wk ) for each k ∈ [ℓ] and sends
+  {Ck }k∈[ℓ] .
+• The verifier samples a random
+                            P challenge τ ←$ F.
+• The prover outputs w := k∈[ℓ] τ k−1 wk . The verifier outputs (x, C) where
+  x := k∈[ℓ] τ k−1 xk and C := k∈[ℓ] τ k−1 Ck .
+       P                       P
+
+Even if each Ck is succinct, the verifier must compute an O(ℓ)-term linear com-
+bination of commitments, i.e., Θ(ℓ) CRC operations. This is precisely the cost
+that becomes prohibitive when the verifier is embedded into a recursive circuit.
+The same issue arises for PCS-based designs once commitments to ℓ polynomials
+must be combined (in-group or via non-native logic) inside the recursive circuit.
+
+
+First attempt: evaluate, but keep all commitments. A natural idea, in-
+spired by oracle batching [22], is to verify linear combinations via polynomial
+evaluations. Let w̃k (X) := mle[wk ] be the multilinear extension of wk , where
+X ∈ Flog n and mle[·] is as in Section 3.2. One can commit to each w̃k (X) and
+to an accumulated polynomial w̃(X), and then check at a random r ←$ Flog n
+that
+                                     ?
+                                       X
+                              w̃(r) =      τk w̃k (r)
+                                       k∈[ℓ]
+
+for appropriate random coefficients {τk }. This avoids combining commitments in
+the group, but it does not reduce recursion overhead. The accumulated instance
+still contains ℓ + 1 commitments (the ℓ inputs plus the output), which must be
+handled by the next accumulation step, reintroducing Θ(ℓ) CRC operations.
+
+
+Accumulation via partial evaluations: one union commitment. The
+key observation is that the prover can commit to all {wk }k∈[ℓ] using a single
+polynomial. Let Y ∈ Flog ℓ index k ∈ [ℓ] via the Boolean hypercube, and define
+the union polynomial
+                         w̃∪ (Y , X) := mle[{wk }k∈[ℓ] ]
+over (Y , X) ∈ Flog ℓ ×Flog n . By construction, for Boolean y encoding k, we have
+w̃∪ (y, X) = w̃k (X). For a uniformly random τ ←$ Flog ℓ , the partial evaluation
+w̃∪ (τ , X) is a random linear combination of the w̃k (X) with coefficients given
+by multilinear equality polynomials over the hypercube. Let w̃(X) denote the
+(honest) accumulated polynomial, defined as
+
+                               w̃(X) := w̃∪ (τ , X).                            (1)
+
+
+                                         7
+If the prover provides a commitment to w̃∪ (Y , X) and a commitment to w̃(X),
+then it suffices for the verifier to check Equation (1) at a single random point
+r ←$ Flog n :
+                                        ?
+                                  w̃(r) = w̃∪ (τ , r).
+Although PCS interfaces do not natively provide partial evaluation queries, the
+verifier can open the two commitments at the points r and (τ , r) and com-
+pare the resulting field values. Given binding openings, soundness reduces to a
+polynomial identity test via Schwartz–Zippel. If w̃(X) ̸= w̃∪ (τ , X) as polyno-
+mials, then equality at a uniformly random r holds with probability at most
+deg(∆)/|F|, where ∆(X) := w̃(X) − w̃∪ (τ , X) and deg(∆) denotes the total de-
+gree. Since w̃ is multilinear in log n variables, we have deg(∆) ≤ log n, yielding
+error at most (log n)/|F|.
+    Crucially, the accumulated instance now contains only a constant number of
+commitments (to w̃∪ and w̃, and similarly for instances as needed), so subsequent
+recursion does not reintroduce Θ(ℓ) CRC operations. We formalize this idea as
+a new primitive termed multi-cast reduction, and instantiate it in Section 4.
+
+
+2.2   Main Result: Multi-instance Accumulation with Constant CRC
+
+We adopt the accumulation framework of Bünz et al. [22,17], which builds accu-
+mulation schemes from interactive oracle reductions (IOR; see Section 3.3). At a
+high level, the framework uses:
+
+• a cast IOR from an NP relation R to a relation Racc , and
+• a many-to-one IOR from (Racc )ℓ to Racc .
+
+The bottleneck in prior multi-instance designs is that the many-to-one step com-
+bines ℓ committed objects, forcing Θ(ℓ) in-circuit CRC operations in the recursive
+verifier. Quasar shifts this combination from the folding stage to a cast stage that
+takes non-committed inputs, so that the recursive verifier pays only a constant
+number of CRC operations.
+    To better accomodate to existing proof systems, we follow Protostar [16]
+and adopt our accumulation to special-sound protocols (SPS; see Section 5.1).
+The result is formalized as Main Theorem 1. We measure recursive-verifier cost
+by separating (i) circuit-expensive CRC and (ii) standard processing of public
+inputs. A CRC is one in-circuit operation computing a random linear combination
+of two committed objects, e.g., C := r1 ·C1 +r2 ·C2 . All bounds below exclude the
+unavoidable linear cost of reading and processing the ℓ public instances, which
+remains linear as usual.
+Theorem 1 (Composing multi-cast with 2-to-1 folding). Let ΠSPS be
+a special-sound protocol for a relation R. Assume we are given: (i) a multi-cast
+reduction IORcast-SPS (and its Fiat–Shamir compilation NIRcast-SPS ), and (ii) a 2-
+to-1 folding reduction IORfold-SPS (and its Fiat–Shamir compilation NIRfold-SPS ),
+both instantiated with an extractable PCS and compiled in the random-oracle
+model. Then the construction in Section 6 yields: (a) a non-interactive argument
+
+                                         8
+NARK for ℓ statements of R, and (b) a multi-instance accumulation scheme ACC
+for NARK, satisfying perfect completeness and round-by-round (RBR) knowledge
+soundness in the random-oracle model. Moreover, each fold level invokes the un-
+derlying batching verifier a constant number of times (independent of ℓ), and the
+O(log ℓ) fold levels contribute only explicit field work (e.g., sum-check / partial
+evaluation), excluding linear public-input processing. (Each batching invocation
+combines two committed oracles into one; see Fig. 11.)
+
+Proof idea. The multi-cast reduction compresses ℓ input instances into a single
+accumulator instance while keeping the accumulator interface constant-size (a
+constant number of oracle polynomials). The folding reduction then combines
+two such accumulator instances into one without increasing that interface, since
+it only requires a constant number of batching checks. Therefore, the number
+of commitment-combination checks in the recursive circuit is independent of ℓ,
+while the only ℓ-dependent work introduced by multi-cast is explicit field work
+(sum-check / partial-evaluation), and linear public-input processing is orthogo-
+nal and excluded from the metric.
+
+Why this is not immediate. It is well-known that sum-check and partial-evaluation
+tests can certify polynomial identities and batched evaluation claims. In partic-
+ular, prior multi-instance designs typically incur Θ(ℓ) commitment-combination
+work per step in the recursive verifier, even when their arithmetic can be orga-
+nized as an MSM. Our main contribution is not the existence of these checks, but
+an accumulation interface that makes them compatible with recursion at arity
+ℓ. Concretely, a naı̈ve “batch ℓ instances and sum-check” approach still leaves
+the recursive verifier facing Θ(ℓ) committed objects (or Θ(ℓ) commitment com-
+binations) somewhere in the pipeline, so the in-circuit commitment-combination
+cost does not disappear. Quasar’s multi-cast reduction is designed to output
+a constant-size committed instance (a constant number of oracle polynomials)
+whose verification requires only O(1) in-circuit CRC, independent of ℓ. The com-
+position theorem then shows that this constant-size interface is preserved under
+2-to-1 folding, so Θ(ℓ) committed objects do not reappear across recursive steps.
+This interface-preservation property, together with a clean cost separation that
+excludes linear public-input processing, is the structural novelty that yields con-
+stant in-circuit CRC in ℓ. We further illustrate this framework in Figure 2.
+
+Multi-cast reduction (informal interface). A multi-cast reduction IORcast takes ℓ
+pairs {(xk , wk )}k∈[ℓ] for Rℓ and outputs one pair (x, w) for Racc . For simplicity,
+assume xk ∈ Fm and wk ∈ Fn with fixed m, n. At a high level:
+• The prover commits to union polynomials x̃∪ (Y , X) := mle[{xk }k∈[ℓ] ] and
+  w̃∪ (Y , X) := mle[{wk }k∈[ℓ] ], producing commitments Cx and Cw .
+• The verifier samples τ ←$ Flog ℓ .
+• The prover provides the accumulated public instance x (computed by field-
+  only processing of {xk }k∈[ℓ] ) and commits to the partially evaluated poly-
+  nomial w̃(X) := w̃∪ (τ , X), producing a commitment C, together with the
+  accumulated witness w.
+
+
+                                         9
+ 𝕩 𝕨                          𝕩                            𝕩        𝕨             𝕩
+
+
+
+
+       𝕨                            𝕩                           𝕨                     𝕩
+
+
+
+Fig. 2: Quasar shifts the ℓ-way combination away from folding. (The multi-cast
+reduction IORcast absorbs ℓ non-committed inputs and outputs a constant-size
+committed instance for Racc , after which IORfold only performs 2-to-1 folding.)
+
+
+• The verifier samples r x ←$ Flog m and r w ←$ Flog n and defines the reduced
+  instance to include (Cx , Cw , C, τ , r x , r w ), together with x.
+The relation Racc enforces that Cx , Cw , C are valid commitments to the claimed
+polynomials and that
+                  x̃∪ (τ , r x ) = x̃(r x )   and w̃∪ (τ , r w ) = w̃(r w ),
+via standard PCS openings, where x̃(·) denotes the multilinear extension of the
+provided public vector x. Computing x from {xk }k∈[ℓ] is a field-only operation
+that is linear in the input length and is not the target of Quasar’s constant-CRC
+improvement.
+
+2-to-1 reduction (informal interface). The 2-to-1 reduction IORfold takes two
+instances for Racc and outputs one instance for Racc . In our instantiations, Racc
+is expressed as the conjunction of a constant number of evaluation subrelations
+of the form
+                
+   Reval (pp) := (C, (r i , vi )i ; p̃(X)) : C = Commit(pp, p̃(X)) ∧ p̃(r i ) = vi ∀i .
+Folding two Reval instances proceeds by (i) reducing two evaluation claims to one
+via a sum-check-derived random linear combination over the field, and (ii) batch-
+ing the corresponding commitments via an oracle batching IORbatch . We require
+IORbatch to be succinct (proof size sublinear in the polynomial length), which
+ensures that the resulting recursive verifier remains efficient. Because IORfold is
+only 2-to-1 and Racc contains a constant number of Reval , each fold step uses
+only a constant number of CRC operations, and the dependence on ℓ arises only
+through the O(log ℓ) number of fold levels.
+
+2.3    Applications to IVC
+We next apply Quasar to IVC. We use the notion of multi-instance IVC (formal-
+ized in Definition 4), where each recursive step processes ℓ predicate instances
+
+
+                                               10
+Fig. 3: Overview of multi-instance IVC: φ denotes the predicate for a computa-
+tion chunk, where φ(z0 , zi , zi+1 , wi ) = 1 indicates compliance.
+
+
+
+together with one running accumulator. This captures settings where the com-
+putation remains sequential (as in standard IVC), but batching ℓ instances per
+step reduces the number of recursive steps and exposes parallelism inside the
+accumulation prover.
+   Figure 3 depicts the resulting workflow. The prover updates the running ac-
+cumulator until ℓ chunk instances have been generated, and then performs a
+multi-instance accumulation step. This enables parallel execution of the accu-
+mulation prover within each step, which is useful when the per-step circuit is
+dominated by commitment-combination logic. It remains an open problem to
+achieve a sublinear accumulation scheme for multiple accumulators (which is
+required for fully general PCD).
+   We emphasize that a multi-instance IVC that accumulates ℓ chunk proofs
+per step is distinct from an IVC that treats one chunk of size ℓ times larger
+as a single instance. In the latter, the final statement and proof typically grow
+proportionally with the enlarged instance, whereas multi-instance IVC keeps the
+per-chunk interface and accumulates across chunks.
+
+
+
+
+Relation to vector-commitment partial evaluation. The partial-evaluation con-
+sistency check above (commit to a union polynomial and verify a random par-
+tial evaluation at a random point) also appears outside accumulation, e.g., in
+HydraProofs [51] for optimally computing all proofs in a vector commitment.
+Quasar’s contribution is not this check in isolation, but using it to build a multi-
+cast IOR that outputs a constant-commitment reduced instance, preventing Θ(ℓ)
+committed objects from reappearing in subsequent folding. This structural shift
+is what yields O(1) CRC operations per recursive step when composing multi-
+cast with a standard 2-to-1 folding reduction.
+
+
+                                        11
+3     Preliminaries
+
+3.1    Notations
+
+We use λ to denote the security parameter. A function negl(λ) is negligible in λ.
+Let F denote a finite field (typically a prime field Fp for a large prime p).
+    Vectors are written in bold, e.g., a ∈ Fn with entries a1 , . . . , an ∈ F. We
+write ai or a[i] for the i-th entry. For n ∈ N, let [n] := {1, . . . , n}. We write
+{ai }i∈[n] as shorthand for {a1 , . . . , an }. A probabilistic algorithm is probabilistic
+polynomial time (PPT) if its running time is bounded by a polynomial in the
+input length. For a finite set S, we write x ←$ S for sampling x uniformly at
+random from S.
+
+Relations and oracles. An indexed NP relation R parameterized by public pa-
+rameters pp (e.g., the field F) consists of tuples (i, x, w), where i is an index, x
+is a public instance, and w is a witness. We call R an oracle relation if tuples
+additionally include an oracle string y, i.e., (i, x, y, w), where y represents one
+or more oracle strings to which the verifier has query access.
+    For an indexed oracle relation
+
+                                    R(pp) ⊆ {(i, x, y, w)},
+
+let
+                       L(R) := {(i, x, y) : ∃w s.t. (i, x, y, w) ∈ R}
+denote the induced language (we sometimes omit pp when clear from context).
+For ℓ ∈ N, we write Rℓ for the product relation consisting of ℓ independent
+instances sharing the same index:
+      n                                                                                               o
+Rℓ := i, (x1 , . . . , xℓ ), (y1 , . . . , yℓ ), (w1 , . . . , wℓ ) : ∀k ∈ [ℓ], (i, xk , yk , wk ) ∈ R .
+                                                                   
+
+
+Given (i, x), let
+                              O(i, x) := {y : (i, x, y) ∈ L(R)}
+denote the set of oracle strings consistent with (i, x).
+    To cover code-based polynomial oracles, we define the distance of a statement
+(i, x, y) from R as
+                          ∆R (i, x, y) := min ∆(y, c),
+                                                  c∈O(i,x)
+
+where ∆(·, ·) is the relative Hamming distance between equal-length strings. We
+defer further discussion of the code-based setting to Appendix D.1.
+
+
+3.2    Multilinear Extensions and Sum-check Protocols
+
+Multilinear extensions. Let f˜: Fm → F be an m-variate polynomial. Its total
+degree deg(f˜) ∈ N is the maximum total degree over all monomials. A polynomial
+is multilinear if every variable has degree at most one.
+
+
+                                                 12
+    Let f ∈ Fn be a vector. For simplicity, we assume n is a power of two, i.e.,
+n = 2m for m := log n (otherwise, pad with zeros). Let Bits(i) ∈ {0, 1}m denote
+the m-bit binary representation of an index i ∈ {0, . . . , n − 1}. The multilinear
+extension (MLE) of f is the unique multilinear polynomial f˜: Fm → F such that
+
+                 f˜(Bits(i)) = f [i + 1]      for all i ∈ {0, . . . , n − 1}.
+
+We write f˜ := mle[f ]. Equivalently,
+                                  n−1
+                                  X
+                        f˜(X) =         f [i + 1] · eq(X,
+                                                    ˜     Bits(i)),
+                                  i=0
+
+where eq(X,
+       ˜    b) is the multilinear extension of the equality predicate on the
+Boolean hypercube. We also write
+                                  m
+                                  Y                                                   
+  ˜ i (X) := eq(X,
+  eq         ˜     Bits(i)) =           Bits(i)[j] · Xj + (1 − Bits(i)[j]) · (1 − Xj ) .
+                                  j=1
+
+                              (<d)
+   For d, n ∈ N, we write Fn   as shorthand for the set of n-variate polynomials
+over F with individual degree < d, i.e.,
+
+    Fn(<d) := F(<d) [X] = {f ∈ F[X1 , . . . , Xn ] : degXj (f ) < d for all j ∈ [n]}.
+
+Sum-check protocol. The sum-check protocol is an interactive proof of Lund
+et al. [47]. Let f˜(X) be an m-variate polynomial with individual degree < d.
+The prover aims to convince the verifier of the claim
+                                       X
+                             sum =           f˜(x).
+                                           x∈{0,1}m
+
+
+The protocol has m rounds. In round i ∈ [m], given challenges r1 , . . . , ri−1 from
+previous rounds, the prover sends a univariate polynomial
+                          X
+          fi (X) :=                  f˜(r1 , . . . , ri−1 , X, xi+1 , . . . , xm ).
+                     xi+1 ,...,xm ∈{0,1}m−i
+
+
+The verifier checks sum = f1 (0) + f1 (1) when i = 1, and checks fi−1 (ri−1 ) =
+fi (0) + fi (1) otherwise. It then samples ri ←$ F and continues. At the end, the
+verifier checks fm (rm ) = f˜(r1 , . . . , rm ). We refer to security definitions of the
+sum-check protocol from [24] and detail them in Appendix D.2.
+                                                                                   (<d)
+Lemma 1 (DeMillo–Lipton–Schwartz–Zippel lemma). Let f˜ ∈ Fn                                be
+a non-zero polynomial. Then
+                                           n · (d − 1)
+                            Pr n f˜(r) = 0 ≤
+                                
+                                                        .
+                           r←$F                  |F|
+
+                                              13
+3.3   Interactive Oracle Reductions
+
+Interactive oracle reductions (IOR) [7,22] are information-theoretic proof systems
+that generalize interactive oracle proofs to the language of reductions. An IOR
+verifier may output claims about oracle strings without reading them in full.
+    We consider public-coin polynomial-time IORs from an oracle relation R to
+an oracle relation R′ with µ rounds of interaction. In round i ∈ [µ], the prover
+sends either a standard message or an oracle string, the verifier responds with
+a uniformly random challenge, and the verifier may query previously received
+oracles.
+
+Definition 1 (Interactive oracle reductions [22]). A public-coin interac-
+tive oracle reduction from oracle relation R to R′ is a tuple of polynomial-time
+algorithms IOR = (I, P, V) with the following syntax.
+
+• The indexer I is deterministic. On input an index i for R, it outputs a short
+  index ι, an index oracle I, and a new index i′ for R′ .
+• The prover P is interactive. On input (i, x, y, w), it engages in µ rounds. In
+  round i, it sends either a non-oracle message mi or an oracle πi , and then
+  receives a challenge ri .
+• The verifier V is interactive. On input (ι, x) and query access to y and I,
+  it engages in µ rounds. In round i, it receives either mi or query access to
+  πi , samples a uniformly random challenge ri from a specified challenge space
+  (typically F or {0, 1}ρi for some ρi ∈ N), and sends ri . After the interaction,
+  it queries I, y, and π, and then either rejects or outputs a new statement
+  (x′ , y′ ).
+• The prover outputs a witness w′ such that (i′ , x′ , y′ , w′ ) ∈ R′ .
+
+     We assume perfect completeness and soundness with proximity radius δ ∗ ∈
+[0, 1], as defined in Definitions 18 and 19 in Appendix D.5. To justify Fiat–
+Shamir in the ROM (in particular, to rule out state-restoration attacks), we use
+the stronger notion of round-by-round (RBR) knowledge soundness [8]. We refer
+to Definition 21 in Appendix D.5 for formal definitions.
+
+
+4     New Technique: Multi-Cast Reduction
+
+This section presents the multi-cast reduction, the core device behind Quasar’s
+constant-CRC recursion overhead. As discussed in Section 2.1, existing multi-
+ple accumulation schemes [16,41,22] require the recursive verifier to compute
+a random linear combination over the commitments of all ℓ input instances,
+i.e., Θ(ℓ) CRC operations. In recursive circuits, CRC is often the dominant cost
+for curve-based and Merkle-hash-based commitments, whereas in lattice/module
+settings the dominant cost may shift. Quasar avoids Θ(ℓ) in-circuit commitment
+combinations by moving the ℓ-way combination into field-only polynomial rela-
+tions and outputting only a constant number of committed objects. Concretely,
+our multi-cast reduction reduces the number of committed objects that must
+
+
+                                       14
+be combined from Θ(ℓ) to O(1), while the reduction verifier’s non-linear work
+is O(log ℓ) field operations (excluding the linear-time public-input processing
+discussed in Section 2.1).
+    We formalize the technique as a multi-cast interactive oracle reduction in
+Section 4.1. We then prove round-by-round (RBR) knowledge soundness in Sec-
+tion 4.2.
+
+4.1     Multi-cast Reductions from Polynomial Evaluations
+We present our multi-cast reduction in the IOR model [22]. At this level, we work
+with polynomial oracles (truth tables), and we defer compilation to polynomial
+commitments to Section 6.1. A key point is that an IOR verifier may output
+evaluation claims about oracle strings without querying them. Accordingly, the
+reduction below outputs a constant-size oracle statement whose verification is
+delegated to later folding steps.
+
+A generic high-degree relation. Let F : Fm × Fn → F be a polynomial map of
+total degree at most d. We write its homogeneous decomposition as
+                                             d
+                                             X
+                               F (x, w) :=         fjF (x, w),
+                                             j=0
+
+where fjF is homogeneous of degree j. We use the indexed relation RF to rep-
+resent an evaluation constraint:
+                 RF (pp) := {(i, x = (x, e), w = w) : F (x, w) = e}.
+(The NP satisfaction constraint corresponds to the special case e = 0.)
+
+Goal. Given ℓ tuples {(i, x(k) , w(k) )}k∈[ℓ] for the multi-instance relation RℓF ,
+we construct an IOR IORcast : RℓF → Racc that outputs a reduced statement
+containing only a constant number of polynomial oracles. The protocol is given in
+Figure 4. The prover receives i, instances {x(k) }k∈[ℓ] , and witnesses {w(k) }k∈[ℓ] .
+The verifier receives (ι, I, i′ ) ← I(i) with i′ = i, and instances {x(k) }k∈[ℓ] .
+
+Interaction phase. We assume ℓ, m, n are powers of two for simplicity. For each
+k ∈ [ℓ], write x(k) ∈ Fm and w(k) ∈ Fn . Let x̃(k) : Flog m → F and w̃(k) : Flog n →
+F denote their multilinear extensions (see Section 3.2), i.e.,
+                 x̃(k) (Bits(j)) = x(k) [j + 1] for j ∈ {0, . . . , m − 1},
+                 w̃(k) (Bits(j)) = w(k) [j + 1] for j ∈ {0, . . . , n − 1}.
+      The interaction has two objectives:
+ • produce an accumulated pair (x, w) from {(x(k) , w(k) )}k∈[ℓ] using only a
+   constant number of committed objects, and
+ • derive an evaluation value e = F (x, w) via a sum-check-based reduction,
+   without placing an ℓ-term commitment combination in the recursive verifier.
+
+
+                                             15
+  P’s inputs: i, {x(i) }i∈[ℓ] ; {w(i) }i∈[ℓ]
+  V’s inputs: ι, I, {x(i) }i∈[ℓ]
+  Interaction phase.
+   1:  P computes:
+                         ˜ i−1 (Y ) · x̃(i) (X),
+                  P
+    x̃∪ (Y , X) := i∈[ℓ] eq
+                          ˜ i−1 (Y ) · w̃(i) (X).
+                  P
+    w̃∪ (Y , X) := i∈[ℓ] eq
+   2:    P → V : oracles [[x̃∪ ]], [[w̃∪ ]].
+   3:   V → P : r y ←$ Flog ℓ .
+   4:    P computes x̃(Y ), w̃(Y ) as:
+                                            (<2)
+                     ˜ i−1 (Y ) · x(i) ∈ (Flog ℓ )m ,
+              P
+     x̃(Y ) := i∈[ℓ] eq
+                                             (<2)
+                      ˜ i−1 (Y ) · w(i) ∈ (Flog ℓ )n .
+              P
+     w̃(Y ) := i∈[ℓ] eq
+   5:   P computes G(Y ) := F (x̃(Y ), w̃(Y )) · eq(Y
+                                                 ˜    , r y ).
+                                                          P
+   6:   P and V engage in a (log ℓ)-round sum-check for y∈BlogG(y)
+                                                               ℓ
+                                                                   = 0, where the
+    prover sends log ℓ sum-check polynomials and the verifier replies with τ ∈ Flog ℓ .
+   7: V checks:
+    Reject if G1 (0) + G1 (1) ̸= 0.
+    Reject if Gi+1 (0) + Gi+1 (1) ̸= Gi (τi ) for any i ∈ [log ℓ − 1].
+   8:   P computes: x̃(X) := x̃∪ (τ , X), w̃(X) := w̃∪ (τ , X).
+   9:   P → V : a message x̃ and an oracle [[w̃]].
+  10: V samples: r x ←$ Flog m , r w ←$ Flog n .
+  Output phase.
+  11:    Define x as the coefficient vector of x̃.
+  12:                                   ˜ −1 (τ , r y ).
+         Define e := Glog ℓ (τlog ℓ ) · eq
+  13:   V outputs:
+    x := (x, τ , r x , r w , e),
+    y := ([[x̃∪ ]], [[w̃∪ ]], [[w̃]]).
+
+
+           Fig. 4: Interactive Oracle Reduction IORcast from RℓF to Racc
+
+
+Task (1): one union oracle and partial evaluation claims. Let Y ∈ Flog ℓ and X
+be the evaluation variables for the MLEs. The prover forms the union polyno-
+mials
+
+         x̃∪ (Y , X) := mle[{x(k) }k∈[ℓ] ],            w̃∪ (Y , X) := mle[{w(k) }k∈[ℓ] ].
+
+By construction, for Boolean y encoding index i − 1, we have
+
+                       x̃∪ (y, X) = x̃(k) (X),         w̃∪ (y, X) = w̃(k) (X).
+
+The prover sends oracles [[x̃∪ ]] and [[w̃∪ ]] at Step 2 in Figure 4.
+
+
+                                                  16
+   Let τ ←$ Flog ℓ denote the (vector) challenge used to define the accumulation
+point. Define the accumulated polynomials by partial evaluation at Y = τ :
+
+                   x̃(X) := x̃∪ (τ , X),        w̃(X) := w̃∪ (τ , X).               (2)
+
+Polynomial oracle interfaces do not provide a primitive that returns the partially
+evaluated polynomial x̃∪ (τ , ·) as a new oracle. Instead, the prover supplies x̃ as
+an explicit message (equivalently, the coefficient vector of the MLE of x), and
+supplies [[w̃]] as an oracle. The reduced statement will include evaluation claims
+tying x̃ and [[w̃]] to the union oracles at the single points (τ , r x ) and (τ , r w ),
+where r x ←$ Flog m and r w ←$ Flog n . These evaluation claims are later checked
+by PCS openings in the compiled scheme.
+    Concretely, the accumulated vectors are defined as
+                     X                             X
+               x :=      ˜ i−1 (τ ) · x(k) ,
+                         eq                  w :=      ˜ i−1 (τ ) · w(k) ,
+                                                       eq
+                   k∈[ℓ]                             k∈[ℓ]
+
+
+      ˜ i−1 is the MLE of the equality predicate on {0, 1}log ℓ (see Section 3.2).
+where eq
+
+Task (2): enforcing e = F (x, w) via sum-check. Define the selector-based vector
+polynomials
+                 X                                  X
+       x̃(Y ) :=      ˜ i−1 (Y ) · x(k) ,
+                      eq                  w̃(Y ) :=     ˜ i−1 (Y ) · w(k) .
+                                                        eq
+                  k∈[ℓ]                                  k∈[ℓ]
+
+
+For Boolean y ∈ {0, 1}log ℓ , the vector (x̃(y), w̃(y)) equals one of the input pairs
+(x(k) , w(k) ).
+   We use the following pointwise facts about equality polynomials on the
+Boolean hypercube.
+Corollary 1 (Adopted from [30]). For any i ∈ {0, . . . , ℓ − 1} and any b ∈
+{0, 1}log ℓ , the equality polynomial satisfies:
+              d
+ • eq ˜ i (b) = eq   ˜ i (b) for all d ∈ N≥1 ;
+ • eq˜ i (b) · eq
+               ˜ j (b) = 0 for all j ̸= i.
+
+Proof. Fix b ∈ {0, 1}log ℓ . By definition, eq
+                                            ˜ i (b) ∈ {0, 1} and exactly one index i
+has eq
+    ˜ i (b) = 1. Both claims follow immediately.
+    Let H(Y ) := F (x̃(Y ), w̃(Y )). By Corollary 1 and the assumption that each
+input tuple satisfies RF , we have H(y) = 0 for all y ∈ {0, 1}log ℓ . To reduce this
+to a single evaluation claim, the verifier samples r y ←$ Flog ℓ and defines
+
+                             G(Y ) := H(Y ) · eq(Y
+                                              ˜    , r y ),
+
+which has individual degree at most d + 1. The parties then run a log ℓ-round
+sum-check to establish          X
+                                      G(y) = 0.
+                                y∈{0,1}log ℓ
+
+
+                                           17
+At the end of sum-check, the verifier obtains a claim of the form
+
+                               G(τ ) = H(τ ) · eq(τ
+                                               ˜ , r y ),
+
+where τ ∈ Flog ℓ is the vector of sum-check challenges. If eq(τ      ˜ , r y ) = 0, the
+verifier rejects (or, equivalently, re-samples r y ); this event occurs with probability
+at most (log ℓ)/|F|. Otherwise, the verifier defines
+
+                                                ˜ , r y )−1 ,
+                           e := H(τ ) = G(τ ) · eq(τ
+
+which yields the desired constraint
+
+                            F (x, w) = F (x̃(τ ), w̃(τ )) = e.
+
+Since G is determined by x̃, [[w̃∪ ]], and r y , the reduced oracle string need not
+include [[G]]
+
+Output phase. The verifier derives x and e at Steps 11–12 and outputs a reduced
+statement whose relation is
+                                                                                        
+                                                                  F (x, w) = e
+                       i, x = (x, τ , r x , r w , e),
+                                                                                        
+     Racc (pp) :=                                           : ∧x̃∪ (τ , r x ) = x̃(r x ) .
+                   y = ([[x̃∪ ]], [[w̃∪ ]], [[w̃]]), w = w
+                                                              ∧w̃∪ (τ , r w ) = w̃(r w )
+                                                                                         
+
+    For later folding, it is convenient to isolate evaluation subrelations. Let vx :=
+x̃(r x ) and vw := w̃(r w ). We view Racc as the conjunction R3eval × RF of the
+following statements:
+
+                   (i, x = (τ , r x , vx ), y = [[x̃∪ ]], w = ⊥) ∈ Reval ,               (3)
+                   (i, x = (τ , r w , vw ), y = [[w̃∪ ]], w = ⊥) ∈ Reval ,               (4)
+                   (i, x = (r w , vw ), y = [[w̃]], w = ⊥) ∈ Reval ,                     (5)
+                   (i, x = (x, e), y = ⊥, w = w) ∈ RF .                                  (6)
+
+Here, Reval is the oracle relation for a list of evaluation claims:
+
+       Reval (pp) := {(i, x = {(r j , vj )}j , y = [[f˜]], w = ⊥) : f˜(r j ) = vj ∀j}.
+
+Lemma 2. The protocol IORcast is an interactive oracle reduction from the multi-
+instance relation RℓF to the indexed oracle relation Racc . It satisfies perfect com-
+pleteness and RBR knowledge soundness. The complexity is measured as follows:
+• The protocol has log ℓ + 2 rounds.
+• The explicit proof messages consist of O(d log ℓ) field elements for sum-check
+  and m field elements for the message x̃.
+• The oracle proof length is ℓ · (m + n) + n field elements for [[x̃∪ ]], [[w̃∪ ]], and
+  [[w̃]].
+• The reduction verifier makes no oracle queries; it outputs a reduced statement
+  containing evaluation claims that are later checked by PCS openings.
+
+
+                                             18
+• Excluding linear-time public-input processing (e.g., computing x from {x(k) }k∈[ℓ] ),
+  the verifier’s non-linear work is dominated by O(d log ℓ) field operations in the
+  sum-check.
+• The reduced relation Racc contains three polynomial oracles.
+
+Suppose that PCS satisfies extractability. The Fiat–Shamir transform FS[IORPCS
+                                                                           cast ]
+yields a non-interactive reduction of knowledge in the ROM.
+
+
+4.2   Round-By-Round Soundness
+
+We prove RBR knowledge soundness for the multi-cast IOR IORcast in Lemma 2.
+We follow the standard RBR proof pattern for public-coin IORs [8,1,22]. We omit
+the completeness proof.
+
+Proof. Fix an adversarial prover P ∗ . We bound the probability that P ∗ produces
+a transcript causing the verifier to output a reduced statement in L(Racc ) with-
+out enabling extraction of a corresponding witness. We decompose the analysis
+into three stages aligned with the protocol structure.
+
+Stage 1: sum-check soundness. LetPG(Y ) be the degree-(d + 1) polynomial de-
+fined in the interaction phase. If y∈{0,1}log ℓ G(y) ̸= 0, then the log ℓ-round
+sum-check accepts with probability at most
+
+                                        log ℓ · (d + 1)
+                                ϵsc ≤                   ,
+                                              |F|
+
+by the standard sum-check soundness bound (Definition 12 in Appendix D.2,
+instantiated with individual degree d+1). Conditioned on sum-check acceptance,
+the transcript defines (τ , G(τ )) such that
+
+                             G(τ ) = H(τ ) · eq(τ
+                                             ˜ , ry )
+
+for some H(Y ) = F (x̃(Y ), w̃(Y )) consistent with the prover’s earlier messages.
+
+Stage 2: defining e and handling division. The verifier defines e by dividing
+by eq(τ
+    ˜ , r y ). If eq(τ
+                   ˜ , r y ) = 0, the verifier rejects. Since eq(τ
+                                                              ˜ , r y ) is a non-zero
+polynomial of total degree log ℓ in r y , the probability that a uniformly random
+r y ←$ Flog ℓ yields eq(τ
+                     ˜ , r y ) = 0 is at most
+
+                                             log ℓ
+                                    ϵdiv ≤         ,
+                                              |F|
+
+by Schwartz–Zippel. Conditioned on non-rejection, the reduced instance includes
+a value e that is consistent with the sum-check transcript, i.e., e = H(τ ).
+
+
+                                           19
+Stage 3: partial-evaluation consistency. The reduced relation includes the two
+evaluation equalities
+                    x̃∪ (τ , r x ) = x̃(r x ),        w̃∪ (τ , r w ) = w̃(r w ),
+                                                 log m
+with independently sampled r x ←$ F         and r w ←$ Flog n . If either equality
+is false as a polynomial identity in X, then it fails at a random evaluation
+point with probability at least 1 − deg /|F|. Since the involved polynomials are
+multilinear in X, we obtain the bound
+                                             log m + log n
+                                    ϵpe ≤                  .
+                                                  |F|
+Extraction. Conditioned on the complement of the bad events in Stages 1–3, the
+reduced statement is consistent with the prover’s oracle strings. An extractor
+can output the witness w by reading [[w̃]] on the Boolean hypercube:
+                   w[j + 1] := w̃(Bits(j)) for j ∈ {0, . . . , n − 1},
+and similarly recover the per-instance witnesses from [[w̃∪ ]] if needed. The relation
+Racc then holds by construction of e and by the evaluation equalities above. The
+extractor runs in time polynomial in the oracle lengths.
+
+Conclusion. Combining the bounds yields an RBR knowledge soundness error
+                                      log ℓ · (d + 1) log ℓ log m + log n
+           ϵ ≤ ϵsc + ϵdiv + ϵpe ≤                    +     +              ,
+                                            |F|        |F|       |F|
+as required.
+
+5     Building Blocks for Accumulation
+We present the two building blocks used to instantiate Quasar for special-sound
+protocols (SPS). First, we recap the SPS interface and the standard “compress-ν-
+checks-to-one” transformation in Section 5.1. Then, we specialize our multi-cast
+reduction to SPS transcripts in Section 5.2. Finally, we define the 2-to-1 folding
+IOR for SPS-based reduced statements in Section 5.3.
+
+5.1   Recap of Special-Sound Protocols
+We adopt the notation of Protostar and ProtoGalaxy [16,30]; see Definition 23
+for the formal definition. Let Πsps be a public-coin special-sound protocol for an
+indexed relation R. Fix public parameters pp (including µ and the field F). Let
+the public instance be x := x ∈ Fm and the witness be w := w ∈ Fn .
+
+Transcript structure. The prover sends µ messages m1 , . . . , mµ . After receiving
+mi , the verifier samples a public-coin challenge ri ←$ F. Thus the transcript
+contains ({mi }i∈[µ] , {ri }i∈[µ] ), where mi+1 may depend on ri for all i ∈ [µ − 1].
+We write r := (r1 , . . . , rµ−1 ) for the challenges that affect the prover’s subsequent
+messages, and we reuse the final challenge as α := rµ .
+
+
+                                                 20
+Homogeneous decomposition. Since Vsps is polynomial of degree at most d, we
+can write it as a sum of homogeneous components:
+                                                d
+                                                       V
+                                                X
+                  Vsps (x, {mi }i∈[µ] , r) :=         fj sps (x, {mi }i∈[µ] , r),     (7)
+                                                j=0
+              V
+where each fj sps is homogeneous of degree j.
+
+Compressing ν checks to one. Accumulation schemes benefit from replacing the
+vector check Vsps (·) = 0ν with a single scalar equation. We use the standard
+random linear combination technique [16]. We compress ν verifier equations into
+one by a random linear combination. We set α := rµ (the final public-coin
+                                                      log ν−1
+challenge) and define α := (α, α2 , α4 , . . . , α2           ), together with constraints
+α[0] = rµ and α[i] = (α[i − 1])2 for all i ∈ [log ν − 1].
+    To keep the resulting relation algebraic with low degree, we represent powers
+via a short vector                                      log ν−1
+                          α := (α, α2 , α4 , . . . , α2         ),
+              a power of two. For each j ∈ [ν],
+assuming ν is P                              Q let S ⊆ {0, . . . , log ν − 1} be such
+that j − 1 = k∈S 2k . Define powj (X) := k∈S Xk , so that powj (α) = αj−1 .
+We then define the scalar check
+                                   X
+       F (x, {mi }i∈[µ] , r, α) :=   powj (α) · Vsps (x, {mi }i∈[µ] , r)[j] = 0.  (8)
+                                    j∈[ν]
+
+The degree of F is at most D := d + log ν.
+   We denote the resulting transformed protocol by CV[Πsps ]. It augments the
+transcript with α (or equivalently α) and enforces the consistency constraints
+                  α[0] = α,       α[i] = (α[i − 1])2 ∀i ∈ [log ν − 1].
+We provide the step-by-step description in Figure 5.
+Lemma 3. If Πsps is (k1 , . . . , kµ )-special-sound for R, then CV[Πsps ] is (k1 ,
+. . . , kµ , ν + 1)-special-sound for R.
+    Proof sketch. Given an extractor Esps for Πsps , an extractor for CV[Πsps ] in-
+vokes Esps on the depth-µ transcript subtree to recover the witness. To argue
+validity, for fixed (x, {mi }, r), the scalar F (·, α) is a univariate polynomial in α
+of degree at most ν − 1. If F (·, α) = 0 holds at ν + 1 distinct points, then all ν
+coordinates of Vsps (·) must be zero (see [16] for the full argument).
+
+5.2   Component 1: Multi-Cast IOR for SPS
+We now specialize the multi-cast reduction of Section 4 to SPS transcripts. We
+view a completed CV[Πsps ] transcript as an index-instance-witness tuple satisfy-
+ing the relation
+            i, x = (x, r, α, α),
+                                                                              
+                                         F (x, {mi }i∈[µ] , r, α) = 0 ∧
+ Rsps :=                         :                                               ,
+           y = ⊥, w = {mi }i∈[µ] α[0] = α ∧ α[i] = (α[i − 1])2 ∀i ∈ [log ν −1]
+where i includes the field F, the function F (·), and the degree bounds.
+
+
+                                                21
+    P’s inputs: pp, x; w
+    V’s inputs: pp, x
+     1:   For i ∈ [µ]:
+           1:    mi ← PSPS (x, w, {mj , rj }i−1
+                                            j=1 ).
+
+           2:    P → V : mi .
+           3:    V → P : ri ←$ F.
+     2:   Define r := (r1 , . . . , rµ−1 ).
+     3:   Set α := rµ .
+                                                     log ν−1
+     4:   P computes α := (α, α2 , α4 , . . . , α2             ).
+     5:   P → V : α.
+     6:   V checks that
+           1:    F (x, {mi }i∈[µ] , r, α) = 0.
+           2:    α[0] = rµ .
+           3:    α[i] = (α[i − 1])2 ∀i ∈ [log ν − 1].
+
+      Fig. 5: Transformed special-sound protocol CV[Πsps ] for relation R.
+
+
+
+Why we interleave SPS with multi-cast. A naı̈ve construction of a multi-cast IOR
+for Rℓ would (i) run CV[Πsps ] independently for each of the ℓ instances, and then
+(ii) apply IORcast to the resulting ℓ transcripts. After Fiat–Shamir, this would
+force the RO to absorb the concatenation of ℓ prover messages per round, i.e.,
+inputs of size Θ(ℓ · |mi |), which is undesirable.
+   Quasar avoids this by interleaving the ℓ executions. In round i ∈ [µ], the
+                        (k)
+prover computes all {mi }k∈[ℓ] and sends a single union oracle encoding them.
+This ensures that each challenge ri is bound to the entire round-i batch while
+keeping the Fiat–Shamir transcript compact (after PCS compilation, the RO ab-
+sorbs only succinct digests of the union oracles, rather than Θ(ℓ) raw messages).
+    We present the protocol IORcast-SPS in Figure 6. The indexer outputs (ι, I, i′ ) ←
+I(i) with I = ⊥ and i′ = i. The prover receives (i, {(x(k) , w(k) )}k∈[ℓ] ), and the
+verifier receives (ι, {x(k) }k∈[ℓ] ).
+    At a high level, the reduced statement produced by IORcast-SPS is a conjunc-
+tion of evaluation subrelations and one F -constraint. Concretely, the reduced
+statement satisfies L(Racc ), where Racc := Reval × Rµeval × Rµeval × RF with:
+
+
+                (i, x = (x, τ , r x , vx ), y = [[x̃∪ ]], w = ⊥) ∈ Reval ,           (9)
+                (i, x = (τ , r w , vt ), y = [[m̃∪,t ]], w = ⊥) ∈ Reval ∀t ∈ [µ],   (10)
+                (i, x = (r w , vt ), y = [[m̃t ]], w = ⊥) ∈ Reval ∀t ∈ [µ],         (11)
+                (i, x = (x, r, α, α, e), y = ⊥, w = {mt }t∈[µ] ) ∈ RF .             (12)
+
+
+                                                 22
+    P’s inputs: (i, {x(k) , w(k) }k∈[ℓ] ).
+    V’s inputs: {i, x(k) }k∈[ℓ] .
+    Interaction phase.
+                                            (k)
+     1:     For each k ∈ [ℓ], set m1              ← Psps (x(k) , w(k) ).
+     2:  P computes:
+                           ˜ k−1 (Y ) · x̃(k) (X),
+                     P
+      x̃∪ (Y , X) := k∈[ℓ] eq
+                      P                       (k)
+                              ˜ k−1 (Y ) · m̃1 (X).
+      m̃∪,1 (Y , X) := k∈[ℓ] eq
+     3:     P → V : [[x̃∪ ]], [[m̃∪,1 ]].
+     4:     V → P : r1 ←$ F.
+     5:      For i ∈ [2, µ] :
+                                                     (k)                   (k)
+            a:     For each k ∈ [ℓ], set mi   ← Psps (x(k) , w(k) , {mj , rj }i−1
+                                                                              j=1 ).
+                                               P                       (k)
+            b:      P computes m̃∪,i (Y , X) := k∈[ℓ] eq˜ k−1 (Y ) · m̃i (X).
+            c:     P → V : [[m̃∪,i ]].
+            d:      V → P : ri ←$ F
+     6:      Set α := rµ .
+                                                            log ν−1
+     7:     P computes α := (α, α2 , α4 , . . . , α2                  ).
+     8:     P → V : α.
+     9:      V checks:
+            a:    Reject if α[0] ̸= rµ .
+            b:     Reject if α[i] ̸= (α[i − 1])2 for any i ∈ [log ν − 1].
+    10:     P and V run the remaining process of IORcast (Step 4–10).
+    Output phase.
+    11:     Define x as the coefficient vector of x̃.
+    12:     Define r := (r1 , . . . , rµ−1 ).
+    13:                                    ˜ −1 (τ , r y ).
+            Define e := Glog ℓ (τlog ℓ ) · eq
+    14:     V outputs x := (x, r, α, α, τ , r x , r w , e),
+      y := ([[x̃∪ ]], {[[m̃∪,i ]]}i∈[µ] , {[[m̃i ]]}i∈[µ] ).
+
+
+          Fig. 6: Interactive oracle reduction IORcast-SPS from Rℓ to Racc-SPS .
+
+
+   According to Theorem 5, IORcast-SPS compiles to a non-interactive oracle proof
+NIRcast-SPS ; see Appendix E.1. Lemma 4 summarizes the resulting security and
+complexity.
+
+Lemma 4. Let CV[Πsps ] be (k0 , . . . , kµ−1 , ν +1)-special-sound for R. Let IORcast
+be an interactive oracle reduction from RℓF to Racc . Then IORcast-SPS is an inter-
+active oracle reduction from Rℓ to Racc satisfying perfect completeness and RBR
+knowledge soundness. Moreover, compiling with an extractable PCS and applying
+
+
+                                                           23
+Fiat–Shamir yields a non-interactive reduction NIRcast-SPS := FS[IORcast-SPS ] in
+the ROM, with complexity:
+• The explicit proof contains m field elements for the accumulated instance x̃
+  and O(d log ℓ) field elements for sum-check.
+• The oracle string contains one oracle [[x̃∪ ]] of size ℓm, µ oracles {[[m̃∪,i ]]}i∈[µ]
+  of size ℓn, and µ oracles {[[m̃i ]]}i∈[µ] of size n.
+• The RO is queried O(µ+log ℓ) times on inputs consisting of a constant number
+  of succinct oracle digests and O(1) field elements (after PCS compilation).
+• Excluding linear-time public-input processing, the verifier’s non-linear work is
+  O(d log ℓ) field operations.
+• The reduced relation Racc contains 2µ + 1 polynomial oracles.
+
+5.3   Component 2: 2-to-1 IOR for SPS
+We now define the 2-to-1 folding reduction, which maps (Racc )2 to Racc . The
+main tool is oracle batching [12,17], which merges two multilinear-oracle evalu-
+ation relations into one.
+Definition 2 (Adopted from [17]). An oracle batching protocol IORbatch
+with proximity radius δ ∗ is an interactive oracle reduction from an indexed oracle
+relation R0 to an indexed oracle relation R1 , where:
+              (                                                1
+                                                                                       )
+                          i, x = (x, v, r),                   X
+        R0 :=                                               :     ˜ i (r) · f˜i (x) = v ,
+                                                                  eq
+                 y = ([[f˜0 ]], [[f˜1 ]]), w = (f 0 , f 1 )
+                                                              i=0
+              n                                                                  o
+        R1 := i, x = {(xj , vj )}j , y = [[f˜]], w = ⊥ : f˜(xj ) = vj .
+
+                                                                      (<2)
+The verifier receives (x, v, r) and oracle access to f˜0 , f˜1 ∈ Flog n . The prover
+additionally receives the witnesses f 0 , f 1 . After interaction, the verifier outputs
+an oracle [[f˜]] and a list of evaluation claims f˜(xj ) = vj . We require:
+                       P1
+• Completeness: if             ˜ i (r) · f˜i (x) = v holds, then the output evaluation
+                          i=0 eq
+  claims hold.
+• Soundness: for every δ ∈ (0, δ ∗ ), if ∆R0 (x, y) > δ, then except with error ϵ0 ,
+  ∆R1 (x, y) > δ.
+• Succinctness: the proof πbatch (excluding oracles) and verification time tbatch
+  are sublinear in the oracle length |f˜|.
+
+Folding (Racc )2 to Racc . We describe the 2-to-1 reduction IORfold-SPS shown in
+                                                       (k)   (k)    (k)
+Fig. 7. The prover receives two valid tuples (iacc , xacc , yacc , wacc ) ∈ Racc for
+k ∈ {0, 1}, and the verifier receives the corresponding public parts.
+   To aggregate the two instances algebraically, we introduce a selector variable
+Z ∈ {0, 1} and define multilinear “folded” values via equality polynomials, e.g.,
+                                         1
+                                         X
+                              x̃(Z) :=         ˜ k (Z) · x(k) .
+                                               eq
+                                         k=0
+
+
+                                           24
+                                                                                   (k)
+We analogously define folded versions of all scalar/vector components of xacc ,
+and define folded (virtual) oracles for the oracle strings. For z ∈ {0, 1}, each
+folded object evaluates to the corresponding object of the selected input k = z.
+    Using these folded objects, the prover and verifier reduce the conjunction
+                                P of Racc to a single low-degree check over Z,
+of the 2µ + 1 defining constraints
+using a 1-round sum-check for z∈{0,1} G(z) = 0 as in Section 4.1. Finally, they
+invoke 2µ + 1 instances of IORbatch in parallel to batch the paired oracles into a
+single oracle string for the output statement.
+
+Remark 1. The protocol IORfold-SPS is a 2-to-1 reduction from (Racc )2 to Racc ,
+where Racc = Reval × Rµeval × Rµeval × RF . The oracle batching step may output a
+list of evaluation claims (indexed by α, β, γ in Fig. 7) rather than a single claim.
+This is resolved by adding a constant number of auxiliary evaluation claims at
+a fixed point (e.g., 0), as in [22,17].
+
+   We state the security and complexity of IORfold-SPS in Lemma 5; the proof
+appears in Appendix F.1. By Theorem 5, IORfold-SPS compiles to a non-interactive
+oracle proof NIRfold-SPS ; see Appendix E.2.
+
+Lemma 5. Let IORbatch be an interactive oracle reduction from R0 to R1 . Then
+IORfold-SPS is an interactive oracle reduction from R2acc to Racc satisfying per-
+fect completeness and RBR knowledge soundness. Compiling with an extractable
+PCS and applying Fiat–Shamir yields a non-interactive reduction NIRfold-SPS :=
+FS[IORPCS
+        fold-SPS ] in the ROM, with complexity:
+
+
+• The explicit proof contains O(d+µ·δ) field elements for sum-check and opened
+  evaluations, where δ denotes the maximum number of evaluation claims output
+  by one invocation of IORbatch .
+• The oracle proof length is O(µℓn) field elements across [[x̃∪ ]], {[[m̃∪,i ]]}i∈[µ] ,
+  and {[[m̃i ]]}i∈[µ] .
+• The verifier time is dominated by (2µ + 1) · tbatch .
+• The reduced relation Racc contains 2µ + 1 polynomial oracles.
+
+
+6    Quasar: Accumulation for SPS
+
+This section instantiates Quasar as a multi-instance accumulation scheme for
+special-sound protocols (SPS) and proves Main Theorem 1. We first present the
+composed construction that combines our multi-cast reduction with our 2-to-1
+folding reduction, and state its formal guarantees as Theorem 2. We then ex-
+plain how the construction is compiled under different polynomial commitment
+schemes (PCS) and where the PCS choice affects the verifier and extractor. Fi-
+nally, we give the concrete NARK and accumulation algorithms induced by the
+two non-interactive reductions from Section 5.
+
+
+                                          25
+6.1   Overview
+
+We recall the syntax of an accumulation scheme (formalized in Appendix D.4).
+An accumulator is a tuple acc = (acc.x, acc.w) such that (i, acc.x, acc.w) ∈ Racc
+for the target accumulator relation Racc . The definition below fixes the syntax.
+
+Definition 3 (Accumulation scheme (informal)). An accumulation scheme
+ACC = (G, I, P, V, D) for a non-interactive argument NARK = (G, I, P, V) con-
+sists of:
+
+• ACC.G(1λ ), which outputs public parameters pp.
+• ACC.I(pp, i), which outputs keys (apk, avk, adk).
+• ACC.P(apk, {x(k) }k∈[ℓ] , π, acc(0) ), which outputs an updated accumulator acc
+  and an accumulation proof pf.
+• ACC.V(avk, {x(k) }k∈[ℓ] , π.x, acc(0) .x, acc.x, pf), which checks that acc.x is a
+  valid update with respect to the public inputs and pf.
+• ACC.D(adk, acc), which decides whether acc is valid.
+
+We call ACC multi-instance if one accumulation step can absorb ℓ NARK state-
+ments {x(k) }k∈[ℓ] . We call ACC sublinear if the verification overhead beyond
+reading the public inputs is o(n · ℓ).
+
+Theorem 2 (Instantiation of Main Theorem 1 for SPS). There exists
+a polynomial-time transformation T such that the following holds. Let R be an
+indexed relation parameterized by pp. Let Racc be an indexed oracle relation
+parameterized by the same pp and implicitly relative to the random oracle. Given
+the following non-interactive reductions in the random-oracle model:
+
+• NIRcast-SPS , a multi-instance reduction from (RPCS )ℓ to RPCSacc , and
+• NIRfold-SPS , a 2-to-1 reduction from (RPCS
+                                           acc ) 2
+                                                   to RPCS
+                                                       acc with  the same generator
+  algorithm as NIRcast-SPS ,
+
+the transformation outputs T [NIRcast-SPS , NIRfold-SPS , Racc ] = (NARK, ACC), where
+NARK is a non-interactive argument for R and ACC is a multi-instance accu-
+mulation scheme for NARK.
+    Let m be the instance length (over F) and let each SPS transcript consist of
+µ prover messages of length at most n (over F). Then the resulting accumulation
+scheme admits the following performance bounds. In particular, each invocation
+of the batching verifier NIRbatch .V combines only two committed oracles (Fig. 11),
+and thus uses O(1) CRC operations independent of ℓ.
+
+• The accumulation prover cost is dominated by O(ℓm + ℓµn) field operations
+  to process the ℓ inputs, plus µ + log ℓ random-oracle queries, plus the cost of
+  running 2µ + 1 instances of the batching prover NIRbatch .P.
+• The accumulation verifier cost is dominated by O(log ℓ) field operations (ex-
+  cluding linear public-input processing), plus µ + log ℓ random-oracle queries,
+  plus the cost of running 2µ + 1 instances of the batching verifier NIRbatch .V,
+  which contributes O(µ) CRC operations in total and is independent of ℓ.
+
+
+                                        26
+Table 3: Comparisons between Multi-Accumulation Schemes (n: polynomial size)
+Schemes               Assump.          Prover        Proof size       Batch proof size
+IPA [18]                  DL          O(n log n)       O(log n)             O(log n)
+Mercury [31]              DL          O(n log n)        O(1)                  O(1)
+                                                                              λ
+RS codes [22]            Hash         O(n log n)       O(log n)        O( log(1/ρ) · log n)
+                                                                              λ
+Linear codes [17]        Hash           O(n)           O(log n)        O( log(1/ρ) · log n)
+
+
+
+• The decider cost is dominated by checking the O(µ) evaluation claims in Racc
+  via PCS.Verify.
+   For simplicity, we focus on distance-preserving accumulation in this paper.
+The extension to promise relations follows the proof strategy of Bünz et al. [22].
+
+Where the PCS matters. In our construction, the PCS choice only affects the
+instantiation of the oracle batching protocol IORbatch (Definition 2) and the re-
+sulting costs of PCS.Open and PCS.Verify for the induced evaluation claims.
+Quasar’s multi-cast step reduces the number of committed objects that must be
+combined across recursion, so the recursive overhead is governed by the batching
+interface rather than by ℓ-way commitment combinations. Accordingly, the key
+requirement on the PCS instantiation is that the batching protocol is succinct
+in the sense of Definition 2, i.e., its proof size and verification time are sublinear
+in the underlying polynomial length.
+    For homomorphic PCS, batching is direct because commitments can be lin-
+early combined in the commitment group. For non-homomorphic PCS (e.g., code-
+based commitments [5,35,56,57]), recent work develops succinct batching IORs
+and their Fiat–Shamir instantiations [22,17]. We summarize representative in-
+stantiations in Table 3, and provide additional details for code-based instantia-
+tions in Appendix A.
+
+6.2   Construction for Accumulation Scheme
+We follow the roadmap of Bünz et al. [22] and describe (i) the induced NARK
+and (ii) the induced accumulation scheme.
+
+NARK construction. We construct NARK = (G, I, P, V) by wrapping the
+reduction NIRcast-SPS . Intuitively, NIRcast-SPS reduces ℓ SPS statements to one
+accumulator statement in RPCS acc , and the NARK proof consists of the reduction
+transcript together with a witness for the reduced relation.
+
+• NARK.G(1λ ) := NIRcast-SPS .G(1λ ).
+• NARK.I(pp, i) runs (pkcast , vkcast , i′ ) ← NIRcast-SPS .I(pp, i) and outputs
+  (pk, vk) := (pkcast , (vkcast , i′ , pp)).
+• NARK.P(pk, {x(k) , w(k) }k∈[ℓ] ) runs NIRcast-SPS .P(pkcast , {x(k) , w(k) }k∈[ℓ] ) to ob-
+  tain (πcast , wacc ) and outputs π := (π.x, π.w) := (πcast , wacc ).
+
+
+                                            27
+• NARK.V(vk, {x(k) }k∈[ℓ] , π) parses vk = (vkcast , i′ , pp) and π = (πcast , wacc ),
+  computes xacc ← NIRcast-SPS .V(vkcast , {x(k) }k∈[ℓ] , πcast ), and accepts iff (i′ , xacc ,
+  wacc ) ∈ RPCS
+            acc (pp).
+
+Proof sketch. Completeness is immediate from the completeness of NIRcast-SPS .
+Knowledge soundness follows by a straight-line reduction from any NARK ad-
+versary to an adversary against NIRcast-SPS , and then invoking the extractor
+guaranteed by Lemma 4.
+
+Accumulation scheme. We construct ACC = (G, I, P, V, D) by combining
+NIRcast-SPS and NIRfold-SPS . Given a NARK proof π for ℓ statements, the prover
+first derives the corresponding reduced accumulator instance via NIRcast-SPS .V,
+and then folds it with the running accumulator via NIRfold-SPS .
+
+• ACC.G(1λ ) := NIRcast-SPS .G(1λ ).
+• ACC.I(pp, i) sequentially runs
+  (pkcast , vkcast , i′ ) ← NIRcast-SPS .I(pp, i) and
+  (pkfold , vkfold , i′ ) ← NIRfold-SPS .I(pp, i) and outputs
+  apk := (vkcast , pkfold , vkfold ), avk := (vkcast , vkfold ), and adk := (i′ , pp).
+                                                                     (1)
+• ACC.P(apk, {x(k) }k∈[ℓ] , π, acc(0) ) parses π = (πcast , wacc ) and:
+  - computes acc(1) .x ← NIRcast-SPS .V(vkcast , {x(k) }k∈[ℓ] , πcast )
+                             (1)
+  - sets acc(1) .w := wacc ,
+  - runs (pf, acc.w) ← NIRfold-SPS .P(pkfold , {acc(0) , acc(1) }),
+  - computes acc.x ← NIRfold-SPS .V(vkfold , {acc(0) .x, acc(1) .x}, pf),
+  - outputs (acc, pf).
+• ACC.V(avk, {x(k) }k∈[ℓ] , πcast , acc(0) .x, acc.x, pf):
+  - computes acc(1) .x ← NIRcast-SPS .V(vkcast , {x(k) }k∈[ℓ] , πcast ),
+  - checks that acc.x = NIRfold-SPS .V(vkfold , {acc(0) .x, acc(1) .x}, pf).
+• ACC.D(adk = (i′ , pp), acc): accepts iff (i′ , acc.x, acc.w) ∈ RPCS      acc (pp).
+
+Proof sketch. Completeness is immediate from the completeness of NIRcast-SPS
+and NIRfold-SPS . Knowledge soundness follows by reducing any successful accu-
+mulator forger to a forger against NIRfold-SPS , and then invoking the extractor
+guaranteed by Lemma 5, while using NIRcast-SPS .V to define the folded public
+instance consistently.
+
+
+7    Conclusion
+Multi-instance recursion is attractive because it reduces the number of recursive
+steps while exposing parallelism within each step. Its main practical bottleneck is
+that existing designs often pay a linear number of circuit-expensive commitment-
+mixing operations as the number of inputs grows. Quasar addresses this bot-
+tleneck by introducing a multi-cast reduction that compresses ℓ commitment-
+combination checks into a constant-size committed interface. As a result, the re-
+cursive verifier incurs O(1) in-circuit CRC operations per step (i.e., commitment
+
+
+                                               28
+random linear combinations), while public-input processing remains a separate
+linear pass as usual.This separation provides a clean cost model for reasoning
+about recursion overhead in settings where commitment mixing is the dominant
+in-circuit expense. We instantiate Quasar with multiple PCS backends and re-
+port circuit-level evidence that the CRC layer can be made substantially cheaper
+than in prior multi-instance folding baselines.
+    Quasar is intentionally scoped to reduce recursion overhead inside the circuit,
+rather than to eliminate the inevitable linear work of reading and validating
+public inputs. When CRC is not the dominant in-circuit cost for a given backend,
+the end-to-end benefit can be correspondingly smaller, and our analysis makes
+this dependency explicit. A natural next direction is to integrate Quasar into
+fully end-to-end recursive IVC stacks across more backends and to tighten the
+constant factors in the RO and field-work components. Another direction is to
+extend the multi-cast perspective to workflows that maintain multiple running
+states, where interface design and accumulation structure become more subtle.
+Overall, Quasar reframes multi-instance recursion around a simple principle,
+namely, preserve a constant-size committed interface under composition, and
+provides a concrete route to constant-CRC recursion overhead in practice.
+
+
+
+
+                                        29
+References
+ 1. Arnon, G., Chiesa, A., Fenzi, G., Yogev, E.: STIR: Reed-Solomon proximity testing
+    with fewer queries. In: CRYPTO Part X. pp. 380–413 (2024). https://doi.org/
+    10.1007/978-3-031-68403-6_12
+ 2. Arun, A., Setty, S., Thaler, J.: Jolt: SNARKs for virtual machines via
+    lookups. In: EUROCRYPT Part VI. pp. 3–33 (2024). https://doi.org/10.1007/
+    978-3-031-58751-1_1
+ 3. Attema, T., Cramer, R., Kohl, L.: A compressed Σ-protocol theory for lat-
+    tices. In: CRYPTO Part II. pp. 549–579 (2021). https://doi.org/10.1007/
+    978-3-030-84245-1_19
+ 4. Babai, L., Fortnow, L., Levin, L.A., Szegedy, M.: Checking computations in
+    polylogarithmic time. In: STOC. pp. 21–31 (1991). https://doi.org/10.1145/
+    103418.103428
+ 5. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Fast Reed-Solomon interactive
+    oracle proofs of proximity. In: ICALP. pp. 14:1–14:14 (2018). https://doi.org/
+    10.4230/LIPICS.ICALP.2018.14
+ 6. Ben-Sasson, E., Bentov, I., Horesh, Y., Riabzev, M.: Scalable zero knowledge with
+    no trusted setup. In: CRYPTO Part III. pp. 701–732 (2019). https://doi.org/
+    10.1007/978-3-030-26954-8_23
+ 7. Ben-Sasson, E., Chiesa, A., Goldberg, L., Gur, T., Riabzev, M., Spooner, N.:
+    Linear-size constant-query IOPs for delegating computation. In: TCC B Part II.
+    pp. 494–521 (2019). https://doi.org/10.1007/978-3-030-36033-7_19
+ 8. Ben-Sasson, E., Chiesa, A., Spooner, N.: Interactive oracle proofs. In: TCC. pp.
+    31–60 (2016). https://doi.org/10.1007/978-3-662-53644-5_2
+ 9. Ben-Sasson, E., Chiesa, A., Tromer, E., Virza, M.: Scalable zero knowledge via
+    cycles of elliptic curves. Algorithmica 79(4), 1102–1160 (2017). https://doi.org/
+    10.1007/S00453-016-0221-0
+10. Bitansky, N., Canetti, R., Chiesa, A., Tromer, E.: Recursive composition and boot-
+    strapping for SNARKs and proof-carrying data. In: STOC. pp. 111–120 (2013).
+    https://doi.org/10.1145/2488608.2488623
+11. Boneh, D., Chen, B.: LatticeFold: A lattice-based folding scheme and its applica-
+    tions to succinct proof systems. In: ASIACRYPT Part III. pp. 330–362 (2025)
+12. Boneh, D., Drake, J., Fisch, B., Gabizon, A.: Halo infinite: Proof-carrying data
+    from additive polynomial commitments. In: CRYPTO Part I. pp. 649–680 (2021).
+    https://doi.org/10.1007/978-3-030-84242-0_23
+13. Bootle, J., Chiesa, A., Hu, Y., Orrù, M.: Gemini: Elastic SNARKs for diverse
+    environments. In: EUROCRYPT Part II. pp. 427–457 (2022). https://doi.org/
+    10.1007/978-3-031-07085-3_15
+14. Bowe, S., Grigg, J., Hopwood, D.: Recursive proof composition without a trusted
+    setup. IACR Cryptol. ePrint Arch. 2019/1021 (2019), https://eprint.iacr.org/
+    2019/1021
+15. Bünz, B., Bootle, J., Boneh, D., Poelstra, A., Wuille, P., Maxwell, G.: Bulletproofs:
+    Short proofs for confidential transactions and more. In: S&P. pp. 315–334 (2018),
+    https://doi.org/10.1109/SP.2018.00020
+16. Bünz, B., Chen, B.: Protostar: Generic efficient accumulation/folding for special-
+    sound protocols. In: ASIACRYPT Part II. pp. 77–110 (2023). https://doi.org/
+    10.1007/978-981-99-8724-5_3
+17. Bünz, B., Chiesa, A., Fenzi, G., Wang, W.: Linear-time accumulation schemes. In:
+    TCC Part I. pp. 11–43 (2025). https://doi.org/10.1007/978-3-032-12287-2_13
+
+
+                                           30
+18. Bünz, B., Chiesa, A., Lin, W., Mishra, P., Spooner, N.: Proof-carrying data without
+    succinct arguments. In: CRYPTO Part I. pp. 681–710 (2021). https://doi.org/
+    10.1007/978-3-030-84242-0_24
+19. Bünz, B., Chiesa, A., Mishra, P.: Recursive proof composition from accumu-
+    lation schemes. In: TCC Part II. pp. 1–37 (2020). https://doi.org/10.1007/
+    978-3-030-64378-2_1
+20. Bünz, B., Chiesa, A., Mishra, P., Spooner, N.: Proof-carrying data from accu-
+    mulation schemes. Cryptology ePrint Archive, Report 2020/499 (2020), https:
+    //eprint.iacr.org/2020/499
+21. Bünz, B., Mishra, P., Nguyen, W., Wang, W.: Accumulation without homomor-
+    phism. In: ITCS. pp. 23:1–23:25 (2025). https://doi.org/10.4230/LIPICS.ITCS.
+    2025.23
+22. Bünz, B., Mishra, P., Nguyen, W., Wang, W.: Arc: Accumulation for Reed-Solomon
+    codes. In: CRYPTO Part VII. pp. 128–160 (2025). https://doi.org/10.1007/
+    978-3-032-01907-3_5
+23. Chen, B.: Symphony: Scalable SNARKs in the random oracle model from lattice-
+    based high-arity folding. Cryptology ePrint Archive, Report 2025/1905 (2025),
+    https://eprint.iacr.org/2025/1905
+24. Chen, B., Bünz, B., Boneh, D., Zhang, Z.: HyperPlonk: PlonK with linear-time
+    prover and high-degree custom gates. In: EUROCRYPT Part II. pp. 499–530
+    (2023). https://doi.org/10.1007/978-3-031-30617-4_17
+25. Chen, W., Chiesa, A., Dauterman, E., Ward, N.P.: Reducing participation costs
+    via incremental verification for ledger systems. Cryptology ePrint Archive, Report
+    2020/1522 (2020), https://eprint.iacr.org/2020/1522
+26. Chiesa, A.: Proof-Carrying Data. Ph.D. thesis, Massachusetts Institute of Tech-
+    nology (2010)
+27. Chiesa, A., Hu, Y., Maller, M., Mishra, P., Vesely, N., Ward, N.P.: Marlin: Pre-
+    processing zkSNARKs with universal and updatable SRS. In: EUROCRYPT Part
+    I. pp. 738–768 (2020). https://doi.org/10.1007/978-3-030-45721-1_26
+28. Chiesa, A., Ojha, D., Spooner, N.: Fractal: Post-quantum and transparent recursive
+    proofs from holography. In: EUROCRYPT Part I. pp. 769–793 (2020). https:
+    //doi.org/10.1007/978-3-030-45721-1_27
+29. Chiesa, A., Tromer, E., Virza, M.: Cluster computing in zero knowledge. In: EURO-
+    CRYPT. pp. 371–403 (2015). https://doi.org/10.1007/978-3-662-46803-6_13
+30. Eagen, L., Gabizon, A.: Protogalaxy: Efficient protostar-style folding of multiple
+    instances. Cryptology ePrint Archive, Report 2023/1106 (2023), https://eprint
+    .iacr.org/2023/1106
+31. Eagen, L., Gabizon, A.: MERCURY: A multilinear polynomial commitment scheme
+    with constant proof size and no prover FFTs. Cryptology ePrint Archive, Report
+    2025/385 (2025), https://eprint.iacr.org/2025/385
+32. Fiat, A., Shamir, A.: How to prove yourself: Practical solutions to identification
+    and signature problems. In: CRYPTO. pp. 186–194 (1986). https://doi.org/10.
+    1007/3-540-47721-7_12
+33. Gabizon, A., Williamson, Z.J., Ciobotaru, O.: PLONK: Permutations over
+    lagrange-bases for oecumenical noninteractive arguments of knowledge. IACR
+    Cryptol. ePrint Arch 2019/953 (2019)
+34. Ganesh, C., Patranabis, S., Singh, N.: Samaritan: Linear-time prover SNARK from
+    new multilinear polynomial commitments. In: ASIACRYPT Part V. pp. 456–489
+    (2025), https://doi.org/10.1007/978-981-95-5116-3_15
+
+
+                                          31
+35. Golovnev, A., Lee, J., Setty, S., Thaler, J., Wahby, R.S.: Brakedown: Linear-time
+    and field-agnostic SNARKs for R1CS. In: CRYPTO Part II. pp. 193–226 (2023).
+    https://doi.org/10.1007/978-3-031-38545-2_7
+36. Grassi, L., Khovratovich, D., Schofnegger, M.: Poseidon2: A faster version of the
+    poseidon hash function. In: AFRICACRYPT. pp. 177–203 (2023), https://doi.
+    org/10.1007/978-3-031-37679-5_8
+37. Groth, J.: On the size of pairing-based non-interactive arguments. In:
+    EUROCRYPT Part II. pp. 305–326 (2016). https://doi.org/10.1007/
+    978-3-662-49896-5_12
+38. Hirai, Y.: Defining the Ethereum virtual machine for interactive theorem provers.
+    In: FC. pp. 520–535 (2017). https://doi.org/10.1007/978-3-319-70278-0_33
+39. Kalapothas, S., Galetakis, M., Flamis, G., Plessas, F., Kitsos, P.: A survey on
+    RISC-V-based machine learning ecosystem. Information 14(2), 64 (2023). https:
+    //doi.org/10.3390/INFO14020064
+40. Kate, A., Zaverucha, G.M., Goldberg, I.: Constant-size commitments to poly-
+    nomials and their applications. In: ASIACRYPT. pp. 177–194 (2010). https:
+    //doi.org/10.1007/978-3-642-17373-8_11
+41. Kothapalli, A., Setty, S.: HyperNova: Recursive arguments for customizable con-
+    straint systems. In: CRYPTO Part X. pp. 345–379 (2024). https://doi.org/10.
+    1007/978-3-031-68403-6_11
+42. Kothapalli, A., Setty, S., Tzialla, I.: Nova: Recursive zero-knowledge arguments
+    from folding schemes. In: CRYPTO Part IV. pp. 359–388 (2022). https://doi.or
+    g/10.1007/978-3-031-15985-5_13
+43. Kothapalli, A., Setty, S.T.V.: SuperNova: Proving universal machine executions
+    without universal circuits. Cryptology ePrint Archive, Report 2022/1758 (2022),
+    https://eprint.iacr.org/2022/1758
+44. Kothapalli, A., Setty, S.T.V.: CycleFold: Folding-scheme-based recursive argu-
+    ments over a cycle of elliptic curves. Cryptology ePrint Archive, Report 2023/1192
+    (2023), https://eprint.iacr.org/2023/1192, https://eprint.iacr.org/2023/
+    1192
+45. Liu, T., Xie, X., Zhang, Y.: zkCNN: Zero knowledge proofs for convolutional neural
+    network predictions and accuracy. In: CCS. pp. 2968–2985 (2021). https://doi.
+    org/10.1145/3460120.3485379
+46. Liu, T., Zhang, Z., Zhang, Y., Hu, W., Zhang, Y.: Ceno: Non-uniform, segment
+    and parallel zero-knowledge virtual machine. J. Cryptol. 38(2), 17 (2025). https:
+    //doi.org/10.1007/s00145-024-09533-2
+47. Lund, C., Fortnow, L., Karloff, H., Nisan, N.: Algebraic methods for interac-
+    tive proof systems. J. ACM 39(4), 859–868 (1992). https://doi.org/10.1145/
+    146585.146605
+48. Maller, M., Bowe, S., Kohlweiss, M., Meiklejohn, S.: Sonic: Zero-knowledge
+    SNARKs from linear-size universal and updatable structured reference strings.
+    In: CCS. pp. 2111–2128 (2019). https://doi.org/10.1145/3319535.3339817
+49. Microsoft: Nova: Recursive SNARKs without trusted setup. https://github.com
+    /Microsoft/Nova
+50. Nguyen, W., Datta, T., Chen, B., Tyagi, N., Boneh, D.: Mangrove: A scalable
+    framework for folding-based SNARKs. In: CRYPTO Part X. pp. 308–344 (2024).
+    https://doi.org/10.1007/978-3-031-68403-6_10
+51. Pappas, C., Papadopoulos, D., Papamanthou, C.: HydraProofs: Optimally com-
+    puting all proofs in a vector commitment (with applications to efficient zk-
+    SNARKs over data from multiple users). In: S&P. pp. 3421–3439 (2025), https:
+    //doi.org/10.1109/SP61157.2025.00204
+
+
+                                         32
+52. Setty, S.T.V.: Spartan: Efficient and general-purpose zkSNARKs without trusted
+    setup. In: CRYPTO Part III. pp. 704–737 (2020). https://doi.org/10.1007/
+    978-3-030-56877-1_25
+53. Sun, H., Li, J., Zhang, H.: zkLLM: Zero knowledge proofs for large language models.
+    In: CCS. pp. 4405–4419 (2024). https://doi.org/10.1145/3658644.3670334
+54. Systems, P., Derei, T., Geren, C., Kaufman, M., Klein, J., Islam, R.: Benchmarking
+    the Plonk, TurboPlonk, and UltraPlonk proving systems. https://api.semantic
+    scholar.org/CorpusID:259902935 (2023)
+55. Valiant, P.: Incrementally verifiable computation or proofs of knowledge im-
+    ply time/space efficiency. In: TCC. pp. 1–18 (2008). https://doi.org/10.1007/
+    978-3-540-78524-8_1
+56. Xie, T., Zhang, Y., Song, D.: Orion: Zero knowledge proof with linear prover
+    time. In: CRYPTO Part IV. pp. 299–328 (2022). https://doi.org/10.1007/
+    978-3-031-15985-5_11
+57. Zeilberger, H., Chen, B., Fisch, B.: BaseFold: Efficient field-agnostic polynomial
+    commitment schemes from foldable codes. In: CRYPTO Part X. pp. 138–169
+    (2024). https://doi.org/10.1007/978-3-031-68403-6_5
+58. Zhang, Y., Genkin, D., Katz, J., Papadopoulos, D., Papamanthou, C.: vSQL: Ver-
+    ifying arbitrary SQL queries over dynamic outsourced databases. In: SP. pp. 863–
+    880 (2017). https://doi.org/10.1109/SP.2017.43
+59. Zhou, W., Cai, Y., Peng, Y., Wang, S., Ma, K., Li, F.: VeriDB: An SGX-based
+    verifiable database. In: SIGMOD. pp. 2182–2194 (2021). https://doi.org/10.
+    1145/3448016.3457308
+
+
+A     Multi-instance IVC
+
+In this section, we instantiate multi-instance IVC from our sublinear accumu-
+lation scheme. We first define multi-instance IVC and its security properties.
+We then sketch the standard black-box route from a NARK plus an accumula-
+tion scheme to (multi-instance) IVC/PCD. Finally, we instantiate the required
+components using a multilinear plonkish constraint system (HyperPlonk) and a
+code-based PCS.
+
+
+A.1    Definitions for Multi-Instance IVC
+
+We extend the IVC definition of Kothapalli et al. [42] from one instance per
+step to ℓ instances per step by following [18]. To support multiple predicates, we
+allow the prover to choose at each step i a predicate φi from a specified set Φ.
+
+Definition 4 (Multi-instance IVC). A tuple of PPT algorithms defines a
+multi-instance incrementally verifiable computation (IVC) as IVC = (G, I, P, V)
+with the following interfaces:
+
+• G(1λ ) → pp samples and outputs public parameters pp.
+• I(pp, φ) → (ipk, ivk) takes pp and a predicate vector φ ∈ Φ∗ , and outputs a
+  prover key ipk and a verifier key ivk.
+
+
+                                          33
+             (k)     (k)       (k)
+• P(ipk, i, {zi , wi , zi+1 }k , Πi ) → Πi+1 takes ipk, a step counter i, ℓ local
+                    (k)    (k)       (k)
+  transitions {(zi , wi , zi+1 )}k , and a proof Πi , and outputs a new proof Πi+1
+                                           (k)
+  attesting the correctness of {zi+1 }k .
+             (k)                                                               (k)
+• V(ivk, i, {zi }k , Πi ) → b takes ivk, a counter i, ℓ public states {zi }k , and a
+  proof Πi , and outputs b ∈ {0, 1} indicating reject or accept.
+
+   A multi-instance IVC quadruple (G, I, P, V) should satisfy perfect complete-
+ness, knowledge soundness, and zero knowledge. We recall the first two properties
+below.
+
+Definition 5 (Perfect completeness). IVC has perfect completeness if for
+every PPT adversary A, the probability Pr[E1 | E2 ] equals 1, where
+                                                                            
+      n φ ∈ Φ ∧ V(ivk, i, {z (k) } , Π ) = 1 ∧ φ i, {z (k) , w(k) , z (k) } = 1 o
+         i                   i    k   i         i     i       i      i+1   k
+ E1 =                      (k)
+                                                                                 ,
+        =⇒ V(ivk, i + 1, {zi+1 }k , Πi+1 ) = 1
+
+and
+
+                                                            pp ← G(1λ )
+                                          (k)  (k) (k)
+                                 (φ, i, {zi , wi , zi+1 }k , Πi ) ← A(pp)
+                           n                                              o
+                   E2 =                                                    .
+                                                  (ipk, ivk) ← I(pp, φ)
+                                                  (k)    (k) (k)
+                               Πi+1 ← P(ipk, i, {zi , wi , zi+1 }k , Πi )
+
+Definition 6 (Knowledge soundness). IVC has knowledge soundness (w.r.t.
+an auxiliary-input distribution D) if for every expected PPT adversary P̃, there
+exists an expected PPT extractor ExtP̃ such that for every set Z, the difference
+of the following two probabilities is negligible:
+
+                                                                            pp ← G(1λ )
+                                                                                          
+     φ⊆Φ
+                     (k)                                                    ai ← D(pp) 
+     ∧ (pp, ai,φ, {zn }k , ao) ∈ Z 
+   
+Pr                                                          (φ, out, ao) ← ExtP̃ (pp, ai)  ,
+                                                                                           
+                     (k)  (k) (k)
+   
+     ∧ ∀i, φi i, {zi , wi , zi+1 }k = 1                          (k)   (k) (k)
+                                                  where out := {zi , wi , zi+1 }k,i∈[n−1]
+and
+                                                           pp ← G(1λ )
+                                                                       
+     φ⊆Φ
+                     (k)                                  ai ← D(pp) 
+    ∧ (pp, ai, φ, {z(k)
+Pr                   n }k , ao) ∈ Z       (k)
+                                                                        .
+                                     (φ, {zn }k , Πn , ao) ← P̃(pp, ai) 
+     ∧ V(ivk, n, {zn }k , Πn ) = 1
+                                                (ipk, ivk) ← I(pp, φ)
+
+Here ai and ao denote auxiliary input and auxiliary output. This formulation
+follows the strong extraction style of [10].
+
+   By [18], an IVC/PCD can be constructed from a NARK together with an
+accumulation scheme. We recall the corresponding statement for multi-instance
+IVC.
+
+
+                                                 34
+Theorem 3 (Multi-instance IVC from accumulation schemes [18]).
+Given a NARK for circuit satisfiability and a multi-instance accumulation scheme
+for that NARK in the standard model, there exists an efficient transformation
+that outputs a multi-instance IVC scheme for constant-depth compliance predi-
+cates, assuming that the circuit complexity of the accumulation verifier is sub-
+linear in its input. Moreover, if the NARK and accumulation scheme are se-
+cure against quantum adversaries, then the resulting PCD is also secure against
+quantum adversaries. If both the NARK and accumulation scheme are zero
+knowledge, then the resulting PCD is also zero knowledge.
+
+
+A.2   IVC Construction
+
+As stated in Theorem 3, there is a generic construction of (multi-instance) IVC
+from a NARK and a multi-instance accumulation scheme. We sketch the inter-
+faces we use for instantiation.
+                                         (k)   (k)   (k)
+• Given ℓ predicates and transitions {(zi , wi , zi+1 )}k , a NARK proof π, and
+  a prior accumulator acc, the prover runs the accumulation prover ACC.P to
+  obtain an updated accumulator acc′ and an accumulation proof pf.
+• The prover forms ℓ recursive circuits that (i) compute φi on the k-th transition,
+  and (ii) embed the accumulation verification for the pair (π.x, acc.x) and
+  update to acc′ .x (one circuit can carry this verification, while the remaining
+  circuits can use dummy wiring as needed by the constraint system).
+• Each recursive circuit is arithmetized into an instance-witness pair for the
+  underlying constraint system. The prover invokes the proving algorithm of
+  our multi-cast reduction (compiled with a PCS) to produce a reduced proof
+  that is suitable for recursive verification.
+• The prover outputs the updated accumulator acc′ and the new IVC proof state
+  Πi+1 induced by the recursive proof.
+• The verifier derives the relevant reduced public instance and checks the accu-
+  mulator update by running the decider on acc′ .
+
+    In our setting, we additionally target a linear-time prover and plausible post-
+quantum security. A natural instantiation route is a multilinear plonkish con-
+straint system (HyperPlonk) together with a linear-code-based PCS. We describe
+the required SPS components and the resulting batching-based accumulation in-
+stantiation next.
+
+
+SPS for HyperPlonk Relations. We first define the multilinear plonkish
+relation (HyperPlonk) as an indexed oracle relation in Definition 7 and then
+present the corresponding SPS protocols in Figure 8, 9, and 10.
+
+Definition 7 (Multilinear plonkish relation). Fix public parameters in-
+cluding the field F, the instance length m, the number of gates µ, the num-
+ber of selector types s, the fan-in/fan-out parameter n, and an algebraic map
+
+
+                                        35
+f : Fs+n → F of degree d. The indexed oracle relation Rplonk is the set of all
+tuples
+
+                        (i := (q, σ), x = p, y = [[w̃]], w = w),
+
+                                                                              (<2)
+where σ : {0, 1}log µ+log n → {0, 1}log µ+log n is a permutation, and q̃ ∈ Flog µ+log s ,
+      (<2)                    (<2)
+p̃ ∈ Flog µ+log m , and w̃ ∈ Flog µ+log n are the multilinear extensions of q, p, and
+w, such that:
+
+• Gate identity: f˜(x) = 0 for all x ∈ {0, 1}log µ , where
+
+                f˜(X) := f ({q̃(Bits(j), X)}s−1                   n−1
+                                            j=0 , {w̃(Bits(j), X)}j=0 ).
+
+
+• Wiring identity: w̃(x) = w̃(σ(x)) for all x ∈ {0, 1}log µ+log n .
+• Instance consistency: p̃(x) = w̃(0log µ+log n−log m , x) for all x ∈ {0, 1}log m .
+
+
+Linear Time Accumulation Scheme. Section 6.1 described instantiations
+of the multi-instance accumulation scheme with homomorphic PCS. Here we
+describe an instantiation using a code-based PCS to target linear-time proving
+and plausible post-quantum security. We first recall notions that are formalized
+in Appendix D.1.
+
+• A linear code is an injective linear map C : Fk → Fn with message length k
+  and codeword length n.
+• The rate of C is ρ := k/n.
+• For u ∈ Fn , the list decoding set within distance δ is denoted Λ(C, u, δ).
+• Out-of-domain sampling lets a verifier sample a point τ ∈ Flog n \ {0, 1}log n
+  and obtain ũ(τ ), where ũ is the multilinear extension of u.
+
+     To instantiate Quasar, the key is to implement the oracle batching protocol
+NIRbatch from Definition 2. Bünz et al. [17] give a practical codeword batching
+protocol for any linear code, which can be compiled with Merkle commitments
+via the BCS transform. At a high level, it reduces two proximity claims (that
+u0 , u1 are δ-close to C) to one proximity claim (that u is δ-close to C), together
+with an evaluation consistency constraint of the form γ0 ·ũ0 (x)+γ1 ·ũ1 (x) = ũ(x).
+     For our batching relation R0 in Definition 2, the evaluation claims are phrased
+over multilinear polynomials f˜0 , f˜1 . In contrast, codeword batching operates on
+codewords ui := C(f i ) and their multilinear extensions. This mismatch is re-
+solved by assuming that C is systematic, i.e., the first k symbols of C(x) equal
+x.
+     Assume that 1/ρ is a power of two. View a codeword ui ∈ Fn as 1/ρ
+consecutive blocks of length k. Let Y ∈ {0, 1}log(1/ρ) select the block and let
+X ∈ {0, 1}log k select the index within the block. Then the multilinear extension
+ũi (Y , X) satisfies ũi (0, X) = f˜i (X) by systematicity. Hence an evaluation claim
+f˜i (x) = vi can be lifted to the codeword claim ũi (0, x) = vi .
+
+
+                                           36
+   Accordingly, we encode the relation R0 as the following relation over code-
+word oracles:
+                                                                                 
+                                                           1
+                  i, x = (α := (0, x), v, r),
+                                                          X                      
+      R′0 :=                                             :   ˜ j (r) · ũj (α) = v ,
+                                                             eq
+               y = ([[ũ0 ]], [[ũ1 ]]), w = (u0 , u1 )                          
+                                                   j=0
+
+where uj = C(f j ). This lets us instantiate NIRbatch via codeword batching [17],
+and then plug it into Quasar’s accumulation scheme.
+   Next, we state the security guarantee for the resulting NIRbatch and give the
+corresponding protocol.
+Theorem 4. The reduction NIRbatch based on linear codes has round-by-round
+knowledge soundness error at most 2−λ for every δ ∈ (0, 1), if the field F and
+repetition parameters t, s satisfy
+                                                          λ
+                 |F| ≥ 2λ/s−1 · |L(C, δ)|2/s ∧ t ≥                .
+                                                     − log(1 − δ)
+
+B    Related Work
+Recursive compositions. Recursive composition enables proving statements
+whose verification includes checking a prior proof, formalized by Bitansky et al. [10].
+A recursive composition must preserve knowledge soundness, so that valid re-
+cursive proofs certify an efficiently computable witness at each step [10,29,28].
+It must also keep the per-step verifier work small (ideally sublinear in the state-
+ment size), since otherwise the cost of verifying the composed computation grows
+prohibitively with the recursion depth.
+
+Halo-style accumulation. Halo introduced accumulation schemes and sparked
+a line of practical recursive proof systems [14]. At a high level, these schemes
+avoid verifying a full SNARK/NARK proof at every recursive step by maintain-
+ing a running instance that represents deferred verification obligations [20,12,18].
+The prover updates this running instance each step, and the recursion checks
+only the local update rather than re-checking all prior proofs. A single final ver-
+ification then discharges the accumulated obligations, yielding end-to-end veri-
+fication comparable to a single step.
+
+Nova-style folding. Nova introduced folding schemes as an alternative accu-
+mulation paradigm for IVC [42]. Rather than accumulating already-compiled
+SNARK/NARK proofs (as in Halo-style approaches, often instantiated via PCS
+such as KZG [40] or Bulletproofs [15]), Nova folds underlying constraint instances
+using (typically) random linear combinations. This shifts work from verifying
+cryptographic proof objects to verifying lightweight consistency checks of folded
+instances, reducing the dominant overhead inside the recursion. Protostar [16]
+and Protogalaxy [30] further extend and systematize folding-based IVC, includ-
+ing variants based on special-sound protocols [3].
+
+
+                                         37
+Hash-based accumulation. Recent work develops accumulation schemes whose
+dominant verification reduces to hash computations rather than PCS checks. A
+general construction for error-correcting codes achieves accumulation but is not
+distance-preserving, with relative distance degrading from δ to δ − ϵ, and it sup-
+ports only bounded-depth accumulation [21]. A subsequent construction gives
+a distance-preserving accumulation scheme for Reed–Solomon codes [22]. This
+approach is later extended to (classes of) locally decodable codes, yielding a
+linear-time accumulation prover [17].
+
+Holographic proofs and preprocessing SNARKs. A recurring goal in
+SNARK design is to reduce online verification cost. In preprocessing SNARKs,
+the verifier performs an offline phase that preprocesses the circuit into a suc-
+cinct summary, and then uses this summary to verify many instances efficiently
+in an online phase. This paradigm underlies several practical systems, including
+Sonic [48], PLONK [33], and Spartan [52]. Marlin [27] connects preprocessing
+SNARKs to the information-theoretic notion of holographic proofs [4], in which
+the verifier queries an encoding of the input rather than reading it in full. This
+viewpoint clarifies the role of preprocessing and query access in achieving suc-
+cinct verification.
+
+C     Implementations and Evaluations
+We evaluate Quasar by measuring the cost of accumulation verification logic em-
+bedded in a recursive circuit. We report circuit constraint counts, native prover
+running time, and peak memory usage for the accumulation prover under vary-
+ing arity. We do not report end-to-end recursive IVC performance, because our
+prototype does not yet include a recursive wrapper (e.g., HyperNova) together
+with an in-circuit verifier for the code-based PCS.
+    All experiments are conducted on a MacBook Air (2025 model) running
+macOS Sequoia 15.6, equipped with an Apple M4 chip (8 cores) and 16 GB
+RAM. The codebase is compiled in --release mode using rustc version 1.92.0
+with default optimization flags.
+    For the curve-based polynomial commitment scheme (PCS), we use Mer-
+cury PCS [31] instantiated over BN256. For the code-based PCS, we use FRI [5]
+with Merkle commitments instantiated via Poseidon [36]. Our implementation
+is structured to admit future linear-time PCS backends, such as Brakedown [35],
+as drop-in replacements for the PCS layer.
+    Due to missing toolchain components, notably (i) a recursive construction
+compatible with our code-based backend and (ii) an in-circuit encoding of the
+FRI verifier, we leave a full multi-instance IVC prototype as future work. In
+this paper, we therefore focus on simulating the accumulation verification logic
+within the circuit and quantifying its constraint footprint. To estimate constraint
+counts, we use the bellpepper crate5 for circuit synthesis and constraint system
+instrumentation.
+5
+    https://github.com/lurk-lang/bellpepper.git
+
+
+                                        38
+Table 4: Circuit size comparison under different arity and degree (ℓ: arity, d:
+degree).
+ Arity                 HyperNova                             Quasar
+  (ℓ)         d=2        d=4         d=8          d=2        d=4          d=8
+    2         12,533     12,539      12,552       12,143      12,149      12,161
+    4         15,667     15,677      15,697       13,229      13,239      13,259
+    8         21,629     21,643      21,671       14,315      14,329      14,357
+    16        32,467     32,485      32,521       15,401      15,419      15,455
+    32        53,057     53,079      53,123       16,487      16,509      16,553
+    64        93,151     93,177      93,229       17,573      17,599      17,651
+
+
+
+C.1      Parameter Settings and Experimental Results
+Unless stated otherwise, we set the security parameter to λ = 128. We fix the
+verifier polynomial degree parameter to d = 2 and vary the accumulation arity
+as ℓ ∈ {2, 4, 8, 16, 32, 64}. For code-based experiments, we use a Reed–Solomon
+code with message length k = 28 and rate ρ = 1/16, hence codeword length
+n = k/ρ = 212 .
+    We evaluate prover performance under different arity settings, including: (i)
+the constraint count of the recursive circuit for accumulation verification, (ii) the
+running time of the accumulation prover (in seconds), and (iii) the peak memory
+consumption of the accumulation prover (in MB). As a representative workload,
+we use a synthetic predicate circuit that incrementally computes a hash chain.
+    Figure 12a reports results for the curve-based PCS instantiation, comparing
+Quasar against HyperNova under identical arity and degree settings. Across all
+arities, Quasar yields lower constraint counts, lower prover time, and lower peak
+memory in our prototype. The dominant source of savings is the reduced number
+of in-circuit CRC operations. Concretely, for ℓ ≥ 16, CRC accounts for more than
+half of the total accumulation-verification constraints in our HyperNova baseline,
+while it remains below one quarter in Quasar.
+    Figure 12b reports results for the code-based PCS instantiation, comparing
+Quasar against Arc under identical arity and degree settings. In our measure-
+ments, Arc incurs a 3–5× higher prover cost than Quasar. This gap is primarily
+driven by the overhead of accumulation in code-based settings, where batching
+and proximity checks dominate the recursive circuit. We view Quasar as a step
+toward making accumulation practical for code-based recursive proof systems.
+    To study scaling with both arity and degree, Table 4 reports constraint counts
+for HyperNova and Quasar across ℓ ∈ {2, 4, 8, 16, 32, 64} and d ∈ {2, 4, 8}.
+
+D        Formal Definitions
+D.1      Linear Codes
+Definition 8 (Linear code). A code over an alphabet Σ with message length k
+and codeword length n is an injective map C : Σ k → Σ n . A code C is a linear
+
+
+                                         39
+code if Σ = F is a field and C is F-linear. In this paper, we assume n ∈ 2N . The
+minimum distance of C is defined as δ(C) := minu̸=v∈Im(C) ∆(u, v).
+
+   We often identify C with its image Im(C) ⊆ Σ n . We view a codeword u ∈
+Im(C) as a function u : [n] → Σ.
+
+Definition 9 (Zero-evaders). A zero-evader over F with error ϵzero is a func-
+tion ZE : DZE → Fm such that
+
+                         ∀v ∈ Fm \ {0},
+                                                                    
+                                             Pr        ⟨ZE(ρ), v⟩ = 0 ≤ ϵzero .        (13)
+                                           ρ←DZE
+
+
+Moreover, let G ∈ Fn×k be an injective F-linear map. Let G̃ denote the multilin-
+ear extension of G. Define ZE : Flog n → Fk by
+                                                   
+                                  ZE(α) := G̃(α, b) b∈{0,1}log k .
+
+Then ZE is a zero-evader with error at most log n
+                                             |F| .
+
+
+Definition 10 (Out-of-domain samples). Let C : Fk → Fn be a linear code.
+Let f : [n] → F be a received word. Let s ∈ N be a repetition parameter and let
+δ ∈ [0, 1] be a distance parameter. Let ZE : DZE → Fk be a zero-evader with error
+ϵzero . Let Λ(C, f, δ) denote the list of codewords in Im(C) within distance δ of f .
+Let L(C, δ) := maxf |Λ(C, f, δ)|. Then
+
+                                                                          L(C, δ)2 s
+                                                                     
+                                ∃ distinct u, v ∈ Λ(C, f, δ) s.t.
+       Pr                                    −1                   −1    ≤         · ϵzero .
+ ρ1 ,...,ρs ←$DZE       ∀i ∈ [s], ⟨ZE(ρi ), C (u)⟩ = ⟨ZE(ρi ), C (v)⟩        2
+
+
+D.2     Sum-check Protocol
+
+We write ⟨P(f˜), V(r)⟩(m, d, sum) → b for the interactive sum-check protocol
+between  prover P and verifier V. The protocol outputs b = 1 if the claim
+P          ˜                       ˜
+  x∈{0,1}m f (x) = sum holds. Here f is an m-variate polynomial with individual
+degree at most d.
+
+Definition 11 (Completeness). If sum = x∈{0,1}m f˜(x), then for an honest
+                                            P
+
+prover P and for all verifier randomness strings r ∈ {0, 1}∗ ,
+
+                              Pr ⟨P(f˜), V(r)⟩(m, d, sum) = 1 = 1.
+                                                            
+
+
+Definition 12 (Soundness). If sum ̸=
+                                           P          ˜
+                                            x∈{0,1}m f (x), then for any (un-
+bounded) prover P and for all verifier randomness strings r ∈ {0, 1}∗ ,
+                 ∗
+
+
+                          Pr ⟨P ∗ (f˜), V(r)⟩(m, d, sum) = 1 ≤ m · d/|F|.
+                                                           
+
+
+                                                  40
+D.3    Polynomial Commitment Scheme
+
+Definition 13 (Multilinear polynomial commitment scheme [57]). A
+multilinear polynomial commitment scheme PCS consists of a tuple of efficient
+algorithms (Setup, Commit, Eval, Verify):
+
+• Setup(1λ , n) → ck takes security parameter λ and variable count n ∈ N, and
+                                                    (<2)
+  outputs a commitment key for polynomials in Fn .
+                                            (<2)
+• Commit(ck, p(X)) → C takes p(X) ∈ Fn           and outputs a commitment C.
+• Eval(P(p(X)), V(ck, C, z, y)) is a protocol between P and V with public inputs
+  (ck, C, z, y), where z ∈ Fn and y ∈ F. The prover additionally knows p(X) ∈
+    (<2)
+  Fn     and aims to convince the verifier that C commits to p and that p(z) = y.
+  The verifier outputs a bit b.
+• Verify(ck, C, z, y, π) → b denotes the (possibly implicit) verifier algorithm for
+  the protocol Eval, where π denotes the transcript provided by the prover in the
+  non-interactive (Fiat–Shamir) form.
+
+   We require PCS to satisfy completeness, binding, and knowledge soundness.
+
+Definition 14 (Completeness). The scheme PCS satisfies completeness if for
+                            (<2)
+any n ∈ N, any p(X) ∈ Fn , and any z ∈ Fn with y := p(z),
+
+                                                              ck ← Setup(1λ , n)
+                                                                                  
+     Verify(ck, C, z, y, π)
+Pr                                                       C ← Commit(ck, p(X)) 
+     =1
+                            π ← Honest transcript of Eval(P(p(X)), V(ck, C, z, y))
+= 1.
+
+Definition 15 (Binding). The scheme PCS is (computationally) binding if for
+any n ∈ N and any PPT adversary A,
+                                                                          
+                 y0 ̸= y1                                             λ
+                                                     ck ← Setup(1 , n) 
+  Pr  ∧ Verify(ck, C, z, y0 , π0 ) = 1                                      ≤ negl(λ).
+                                        (C, z, y0 , y1 , π0 , π1 ) ← A(ck)
+       ∧ Verify(ck, C, z, y1 , π1 ) = 1
+
+Definition 16 (Knowledge soundness). PCS satisfies knowledge soundness
+if Eval is an argument of knowledge for the relation
+
+       Reval (ck) := {(C, z, y; p(X)) : p(z) = y ∧ C = Commit(ck, p(X))},
+
+where ck ← Setup(1λ , n). That is, for any n ∈ N and any PPT adversaries A
+and P̃, there exists an expected polynomial-time extractor E such that for any
+auxiliary randomness r,
+
+                                                           ck ← Setup(1λ , n)
+                                                                                   
+                ck ← Setup(1λ , n)
+                                             
+                                                         (C, z, y) ← A(ck, r)      
+Pr            (C, z, y) ← A(ck, r)            ≈ Pr                               .
+                                                           p(X) ← E(ck, r)         
+     Verify(ck, C, z, y, π) = 1 for π ← P̃(r)
+                                                       (C, z, y; p(X)) ∈ Reval (ck)
+
+                                          41
+D.4     Multi-Instance Accumulation Schemes
+We adopt the definition of accumulation schemes for NARK from BCLMS21 [18].
+We consider a non-interactive argument of knowledge NARK := (G, I, P, V) in
+the ROM for an indexed relation R. We assume proofs have a canonical partition
+π := (π.x, π.w).
+Completeness. NARK is complete if for every (unbounded) adversary A,
+                                                              pp ← G(1λ )
+                                                                         
+           (i, {x(k) , w(k) }k ) ∈ R∗ (pp) (i, {x(k) , w(k) }k ) ← A(pp) 
+       Pr                                                                 = 1.
+           ⇒ V(vk, {x(k) }k , π) = 1                (pk, vk) ← I(pp, i) 
+                                              π ← P(pk, {x(k) , w(k) }k )
+Knowledge soundness. NARK is knowledge sound with respect to auxiliary
+input distribution χ if for every (non-uniform) polynomial-time malicious prover
+P̃ there exists a deterministic polynomial-time extractor E such that
+                                                                       pp ← G(1λ )
+                                                                                       
+                                                                        ai ← χ(1λ ) 
+           V(vk, {x(k) }k , π) = 1
+   
+                                                                                       
+Pr 
+   
+                                       ∗            (i, {x }k , π), tr ← P̃(pp, ai) 
+                                                          (k)
+                                                                                         ≤ negl(λ).
+     ∧  ( i , { x(k)
+                     , w (k)
+                             } k ) ∈
+                                   / R   (pp)
+                                                             (pk, vk) ← I(pp, i) 
+                                              {w(k) }k ← E(pp, i, {x(k) }k , π, ai, tr)
+Definition 17 (Multi-instance accumulation schemes). A multi-instance
+accumulation scheme for NARK is a tuple ACC = (G, I, P, V, D) with G the same
+as NARK.
+• ACC.G(1λ ) → pp samples and outputs public parameters pp.
+• ACC.I(pp, i) → (apk, avk, adk) deterministically outputs accumulator keys and
+  a decision key.
+• ACC.P(apk, {x(k) }k , π, acc) → (acc′ , pf) takes multiple instances {x(k) }k , a
+  proof π = (π.x, π.w), and an old accumulator acc = (acc.x, acc.w), and out-
+  puts a new accumulator acc′ = (acc′ .x, acc′ .w) and an accumulation proof
+  pf.
+• ACC.V(avk, {x(k) }k , π.x, acc.x, acc′ .x, pf) → b outputs accept/reject.
+• ACC.D(adk, acc) → b takes adk and an accumulator acc and outputs whether
+  acc is valid for the corresponding index.
+Completeness. For every (unbounded) adversary A, the probability Pr[E1 | E2 ]
+equals 1, where E1 , E2 are events defined as:
+
+                   NARK.V(vk, {x(k) }k , π) = 1 ∧ ACC.D(adk, acc) = 1
+                                                                                                  
+E1 :=                                                                                                  ,
+            ⇒ ACC.V(avk, {x(k) }k , π.x, acc.x, acc′ .x, pf) = 1 ∧ ACC.D(adk, acc′ ) = 1
+
+                                                      pp ← ACC.G(1λ ) 
+                                                                      
+                         
+                                                                      
+                                        (i, {x(k) }k , π, acc) ← A(pp) 
+                         
+                                                                      
+                                                                      
+                  E2 :=                   (pk, vk) ← NARK.I(pp, i) .
+                                     (apk, avk, adk) ← ACC.I(pp, i) 
+                        
+                                                                      
+                        
+                                                                      
+                                                                       
+                              ′
+                          (acc , pf) ← ACC.P(apk, {x }k , π, acc)
+                                                           (k)
+                                                                      
+
+
+                                               42
+Knowledge soundness. ACC is knowledge sound with respect to auxiliary
+input distribution χ if for every non-uniform polynomial-time malicious prover P̃
+there exists a polynomial-time extractor E such that the probability Pr[E3 | E4 ]
+is negligibly close to 1, where E3 , E4 are events defined as:
+
+            ACC.V(avk, {x(k) }k , π.x, acc.x, acc′ .x, pf) = 1 ∧ ACC.D(adk, acc′ ) = 1
+                                                                                             
+E3 :=                                                                                             ,
+                    ⇒ E outputs witnesses consistent with π and acc
+
+
+                                                           pp ← ACC.G(1λ ) 
+                                                                                 
+                
+                                                                 ai ← χ(1λ ) 
+                
+                                                                                 
+                
+                                                                                 
+                                                                                  
+                                                                                 
+                                                      ′
+                          (i, {x }k , π.x, acc.x, acc , pf; tr) ← P̃(apk, ai)
+                                (k)
+                                                                                 
+        E4 :=                                                                       .
+              
+                                               (pk, vk) ← NARK.I(pp, i)         
+                                           (apk, avk, adk) ← ACC.I(pp, i) 
+              
+                                                                                 
+              
+                                                                                 
+                                                                                  
+                (π.w, acc.w) ← E(pp, i, {x(k) }k , π.x, acc.x, acc′ , pf; ai, tr)
+                                                                                 
+
+
+D.5     Definitions for Interactive Oracle Reductions
+
+Definition 18 (Completeness). An IOR is complete if for any (i, x, y, w) ∈
+R,
+
+                                                                   (ι, I, i′ ) ← I(i)
+                                                                                     
+       Pr        (i′ , x′ , y′ , w′ ) ∈ R′                                              = 1.
+    {ri }i∈[µ]                             (x′ , y′ ; w′ ) ← ⟨P(x, y, w), V I,y (x)⟩
+
+Definition 19 (Soundness). For every proximity bound δ ∈ (0, δ ∗ ), every
+statement (i, x, y) ∈   / L(R) with ∆R (i, x, y) > δ, and every (unbounded) prover
+P ∗,
+
+                                                           (ι, I, i′ ) ← I(i)
+                                                                             
+        Pr        ∆R′ (i′ , x′ , y′ ) ≤ δ                                       ≤ ϵ(i, x, y, δ).
+     {ri }i∈[µ]                           (x′ , y′ ; w′ ) ← ⟨P ∗ , V I,y (x)⟩
+
+    We omit δ when there is no proximity gap, i.e., when δ = δ ∗ = 0.
+
+Definition 20 (Knowledge state function for IOR [17]). Let IOR = (I, P, V)
+be a µ-round IOR from R to R′ with proximity radius δ ∗ . A knowledge state func-
+tion for IOR is a (possibly inefficient) function State, parameterized by δ ∈ [0, δ ∗ ),
+that on input (i, x, y, tr, w) outputs a bit and satisfies:
+
+• Empty transcript: If tr = ∅, then Stateδ (i, x, y, tr, w) = 1 iff there exists y∗
+  such that (i, x, y∗ , w) ∈ R and ∆(y, y∗ ) ≤ δ.
+• Prover moves: If the prover is about to move and Stateδ (i, x, y, tr, w) = 0,
+  then for every prover message π we have Stateδ (i, x, y, tr∥π, w) = 0.
+• Full transcript: If tr = (π1 , r1 , . . . , πµ , rµ ) is full, then Stateδ (i, x, y, tr, w) =
+  1 iff the verifier outputs (i′ , x′ , y′ ) such that there exists y∗′ with (i′ , x′ , y∗′ , w) ∈
+  R′ and ∆(y′ , y∗′ ) ≤ δ.
+
+
+                                               43
+Definition 21 (A variant of round-by-round knowledge soundness [17]).
+ A µ-round IOR = (I, P, V) from R to R′ with proximity radius δ ∗ has RBR
+knowledge soundness errors (ϵ1 , . . . , ϵµ ) and extraction times (et1 , . . . , etµ ) if
+there exist a knowledge state function State and a deterministic extractor E such
+that for every δ ∈ (0, δ ∗ ), every (i, x, y), every round index i ∈ [µ], and every
+partial transcript tr = (π1 , r1 , . . . , πi−1 , ri−1 , πi ) where the verifier is about to
+sample ri , the extractor runs in time at most eti and
+
+Pr [∃w : Stateδ (i, x, y, tr, E(i, x, y, tr∥ri , w)) = 0 ∧ Stateδ (i, x, y, tr∥ri , w) = 1]
+ ≤ ϵi (i, x, y, δ).
+
+    Bünz et al. [17] show that RBR knowledge soundness implies straightline
+state-restoration knowledge soundness, which suffices for Fiat–Shamir security.
+
+Theorem 5 (Polynomial IOR compilation adopted from [24]). There is
+a transformation T from a public-coin polynomial interactive oracle reduction
+IOR to a non-interactive reduction NIR with compilation in two steps:
+
+• replace every oracle in IOR with a polynomial commitment PCS to obtain
+  IORPCS ;
+• apply the Fiat–Shamir transform to IORPCS to obtain NIR := FS[IORPCS ].
+
+If IOR is RBR knowledge sound and PCS is extractable, then NIR is RBR knowl-
+edge sound in the ROM. The prover time, verifier time, and proof size of NIR
+are obtained by summing the corresponding costs from IOR and from the PCS
+compilation (commitments and openings) according to the message and query
+complexity of IOR.
+
+
+D.6     Definitions for Special-Sound Protocols
+
+For an N P relation R := {(x; w)}, an interactive proof for R allows a prover P
+to convince a verifier V that x admits a witness w. In a (2µ − 1)-move protocol,
+the prover and verifier exchange µ prover messages and µ−1 verifier challenges. If
+V samples each challenge uniformly at random and independently of the prover’s
+messages, the protocol is public coin. Public-coin protocols can be transformed
+into non-interactive protocols via Fiat–Shamir [32].
+
+Definition 22 (Tree of transcripts). Let k ∈ N and (a1 , . . . , ak ) ∈ Nk .
+                                                     Qk
+An (a1 , . . . , ak )-tree of transcripts is a set of i=1 ai transcripts organized as a
+rooted tree. Edges correspond to verifier challenges. Vertices correspond to prover
+messages (possibly empty). Each node at depth i has ai children, corresponding
+to ai distinct challenges. Each transcript corresponds to a unique root-to-leaf
+path.
+
+Definition 23 ((a1 , . . . , ak )-special soundness). A protocol Π provides (a1 ,
+. . . , ak )-special soundness if there exists a PPT extractor E that, given (x, T ) for
+any (a1 , . . . , ak )-tree of accepting transcripts T , outputs w such that (x; w) ∈ R.
+
+
+                                            44
+Lemma 6 ((a1 , . . . , ak )-special soundness vs. knowledge soundness [3]).
+ Let k, a1 , . . . , ak ∈ N and let (G, P, V) be a (a1 , . . . , ak )-special sound (2k +
+1)-move public-coin protocol for relation R, where each challenge is sampled
+uniformly from F. Then (G, P, V) is knowledge sound with knowledge error
+                                        Pk
+                                          i=1 (ai − 1)
+                                   κ≤                    .
+                                              |F|
+
+
+E      Complementary Protocols
+
+E.1     Non-Interactive Multi-Cast Reduction for SPS
+
+Let pp ← NIRcast-SPS .G(1λ ) and (pk, vk, i′ ) ← NIRcast-SPS .I(pp, i). We define the
+non-interactive prover and verifier algorithms in Figure 13 and 14 for the non-
+interactive reduction NIRcast-SPS := (G, I, P, V) defined in Section 4.1, where the
+hash function Hash will be modeled by the RO in the security analysis. We
+denote r F := (r∥α) for short.
+
+
+E.2     Non-Interactive 2-to-1 Reduction
+
+Let pp ← NIRfold-SPS .G(1λ ) and (pk, vk, i′ ) ← NIRfold-SPS .I(pp, i). We define the
+non-interactive prover and verifier algorithms in Figure 15 and 16 for the non-
+interactive reduction NIRfold-SPS := (G, I, P, V) defined in Section 5.3.
+
+
+F      Security Proofs
+
+F.1     Proof of Lemma 5
+
+Proof. To conduct the proof, we follow the roadmap of Arc and WARP [1,22].
+The completeness holds trivially. For the RBR knowledge soundness, the protocol
+IORfold has soundness error ϵzc , ϵsc , ϵbatch with extraction time O(ℓ2 · n2 ), where:
+
+    ϵzc = (µ + 1)/|F|, ϵsc = max(d + 1, log(ℓn))/|F|, ϵeval = µ/|F|, ϵbatch = 2µ · ϵ0 .
+
+where ϵ0 is the soundness error for the oracle batching protocol IORbatch . We
+define the state function and prove bounds on the RBR knowledge soundness
+error as follows:
+
+• State function for empty transcript. Given an input x = {x(k) }k∈[k] , y =
+  {y(k) }k∈[k] , we set State(i, x, y, ∅) = 1 if and only if (x(k) , y(k) ) ∈ L(RF ) for
+  all k ∈ [ℓ].
+• Bounding ϵzc . At this stage, the partial transcript is empty as tr = ∅ and the
+  verifier sends γ ∈ Flog(µ+1) , rz ∈ F. We set the state function State(i, x, y,
+  tr∥γ,
+    P rz ) = 1 if and only if the following hold:
+  -    z∈{0,1} G(z) = 0.
+
+
+                                             45
+                                                          (k)                 (k)
+  The extractor outputs the witness w = ({m∪,i }i∈[µ],k∈[1] , {mi }i∈[µ],k∈[1] ) in
+                               (k)             (k)
+  time O(µ·n2 ), where m∪,i [j] = m̃∪,i (Bits(j)), j ∈ [ℓn] queried from [[m̃∪,i ]], and
+     (k)
+  mi [j] = m̃i (Bits(j)), j ∈ [n] queried from [[m̃i ]]. For the knowledge error, we
+  show that if the extracted witness is invalid, i.e., State(i, x, y, w, tr) = 0, then
+  State(i, x, y, tr∥γ, r z ) = 1 holds with a negligible probability ϵzc . Concretely,
+  we define {G(k) (Z γ , Zr )}k∈[1] as a multivariate polynomial below
+
+      G(k) (Z γ , Zr ) = eq(Z
+                                     
+                           ˜ r , k) · (F (x̃(k), {mi (k)}i∈[µ] , r F (k)) − e(k)) (14)
+                          X
+                       +       powi (Z γ ) · (m̃i (k, r x (k))) − vi (k))
+                           i∈[µ]
+                           X                                                           
+                       +           powi+µ (Z γ ) · (m̃∪, i(k, τ (k), r x (k)) − vi (k)) .
+                           i∈[µ]
+
+  Since G(k) (Z γ , Zr ) has total degree at most µ + 1, then k∈[1] G(k) (Z γ , Zr )
+                                                                    P
+
+  equals to zero with probability ϵzc ≤ (µ + 1)/|F|.
+• Bounding ϵsc . For the sum-check protocol, the partial transcript has the form
+  tr = (γ, rz , G(Z)). We set the state function State(i, x, y, tr∥σ) = 1 if and only
+  if the following hold:
+                                  
+                        ˜ z , σ) · (F (x̃(σ), {mi (σ)}i∈[µ] , r F (σ)) − e(σ))
+              G(σ) = eq(r                                                        (15)
+                       X
+                    +      powi (γ) · (m̃i (Z, r x (Z))) − vi (Z))
+                       i∈[µ]
+                       X                                                        
+                   +           powµ+i (γ) · (m̃∪,i (Z, τ (Z), r x (Z)) − vi (Z))
+                       i∈[µ]
+
+  To bound the error, we prove that if State(i, x, y, tr) = 0, i.e., z∈{0,1} G(z) ̸=
+                                                                      P
+
+  0, then State(i, x, y, tr∥σ) = 1 holds with a negligible probability ϵsc . The only
+  way the prover can convince the verifier is by sending a univariate polynomial
+  G′ (Z) with maximum degree max(d + 1, log(ℓn)) that does not equal the pre-
+  scribed polynomial G(Z) and yet G′ (σ) = G(σ), of which the probability is
+  bounded by max(d + 1, log(ℓn))/|F|.
+• Bounding ϵeval . At this stage, the partial transcript is tr = (γ, rz , G(Z), σ, G(σ)).
+  The prover sends the new evaluation claims as η := (η, {ηi , η∪,i }i∈[µ] ). We set
+  the state function State(i, x, y, tr∥η) = 1 if and only if the following holds:
+  - η = F (x̃(σ), {mi (σ)}, r F (σ)) − e(σ)
+  - ηi = m̃i (σ, r x (σ)) − vi (σ)
+  - η∪,i = m̃∪, i(σ, τ (σ), r x (σ)) − vi (σ)
+  For the knowledge error, we show that if the claim G(σ) is invalid, i.e.,
+  State(x, y, w, tr) = 0, then State(i, x, y, tr∥η) = 1 holds with a negligible
+  probability ϵeval . Clearly, given a randomly sampled γ ∈ Flog µ+1 , the prover
+  can forges a vector η ′ satisfying the following equation with probability at
+  most µ/|F|:
+                                   X                    X
+                 ˜ z , σ) · [η ′ +
+       G(σ) = eq(r                     powi (γ) · ηi′ +                    ′
+                                                           powi+µ (γ) · η∪,i ].     (16)
+                                       i∈[µ]                    i∈[µ]
+
+
+                                                     46
+• Bounding ϵbatch . At this stage, the partial transcript has the form tr = (γ, rz , G(Z),
+  σ, G(σ), η) and the verifier sends c = ({(y j , xj )}j , {xt }t ). We set the state
+  function State(i, x, y, tr∥c) = 1 if and only if the following hold:
+  - (x = {y j , xj , vj }j , y = [[m̃∪,i ]], w = ⊥) ∈ Reval ∀j ∈ [µ]
+  - (x = {xt , vt }t , y = [[m̃i ]], w = ⊥) ∈ Reval ∀t ∈ [µ]
+  - (x = (x, r F , e), y = ⊥, w = {mi }i∈[µ] ) ∈ RF
+  where m̃i = m̃i (σ) and m̃∪,i = m̃∪,i (σ) for all i ∈ [µ]. For the knowledge error,
+  we show that if the batched witnesses are invalid, i.e., State(i, x, y, w, tr) = 0,
+  then State(i, x, y, tr∥c) = 1 holds with a negligible probability ϵbatch . Since
+  each protocol IORbatch has soundness error ϵ0 , the overall probability is re-
+  stricted by a union bound as 2µ · ϵ0 .
+
+
+
+
+                                         47
+                       (k)      (k)
+P’s inputs: (iacc , {xacc , wacc }1k=0 )
+                       (k)
+V’s inputs: (iacc , {xacc }1k=0 )
+Interaction phase.
+ 1:   For each k ∈ {0, 1}, define vec(k) as
+                                   (k)     (k)             (k)   (k)        (k)    (k)          (k)
+ (x(k) ∥ r (k) ∥ α(k) ∥ τ (k) ∥ r x ∥ r w ∥ (e(k) , vx , v1 , . . . , vµ ) ∥ m1 ∥ · · · ∥ mµ ).
+ 2:   P computes
+                              P1
+                 ˜
+                vec(Z) :=         ˜ k (Z) · vec(k) ,
+                              k=0 eq
+                                 P1                  (k)
+                x̃∪ (Z, Y , X) := k=0 eq ˜ k (Z) · x̃∪ (Y , X),
+                                  P1              (k)
+                m̃i (Z, X) :=         ˜ k (Z) · m̃i (X) ∀i ∈ [µ],
+                                  k=0 eq
+                                                        (k)
+                m̃∪,i (Z, Y , X) := 1k=0 eq
+                                    P
+                                            ˜ k (Z) · m̃∪,i (Y , X) ∀i ∈ [µ].
+ 3:   P parses vec(Z)
+                ˜     as
+                   x̃(Z), r̃(Z), α̃(Z), τ̃ (Z), r̃ x (Z), r̃ w (Z), ẽ(Z), ṽx (Z),
+                             ṽ1 (Z), . . . , ṽµ (Z), m̃1 (Z), . . . , m̃µ (Z).
+                         log(2µ+2)
+ 4:   V → P : γ ←$ F          , rz ←$ F.
+                                                                           
+ 5:    P computes G(Z) := eq(r
+                             ˜ z , Z) · p1 (Z) + p2 (Z) + p3 (Z) + p4 (Z) , where
+                                               
+              p1 (Z) := x̃∪ Z, τ̃ (Z), r̃ x (Z) − ṽx (Z),
+                        P                                         
+              p2 (Z) := i∈[µ] powi (γ) · m̃i Z, r̃ w (Z) − ṽi (Z) ,
+                        P                                                    
+              p3 (Z) := i∈[µ] powµ+i (γ) · m̃∪,i Z, τ̃ (Z), r̃ w (Z) − ṽi (Z) ,
+                                                                                     
+             p4 (Z) := pow2µ+1 (γ) · F (x̃(Z), {m̃i (Z)}i∈[µ] , r̃(Z), α̃(Z)) − ẽ(Z) .
+                                                              P
+ 6:   P and V engage in a 1-round sum-check protocol for z∈{0,1} G(z) = 0,
+       and output a claim on G(σ).
+ 7:   P → V : ηx , {ηi , η∪,i }i∈[µ] , ηF , where
+                                             
+             ηx := x̃∪ σ, τ̃ (σ), r̃ x (σ) − ṽx (σ),
+                                      
+             ηi := m̃i σ, r̃ w (σ) − ṽi (σ) ∀i ∈ [µ],
+                                                
+             η∪,i := m̃∪,i σ, τ̃ (σ), r̃ w (σ) − ṽi (σ) ∀i ∈ [µ],
+             ηF := F (x̃(σ), {m̃i (σ)}i∈[µ] , r̃(σ), α̃(σ)) − ẽ(σ).
+ 8:   V checks whether G(σ) equals
+                P                    P                                          
+ ˜ z , σ) · ηx + i∈[µ] powi (γ) · ηi + i∈[µ] powµ+i (γ) · η∪,i + pow2µ+1 (γ) · ηF .
+ eq(r
+ 9: P and V engage 2µ + 1 oracle batching protocols IORbatch in parallel. Output
+phase.
+10: Define {(y α , xα , vα )}α , {(y β , xβ , vβ )}β , {(xγ , vγ )}γ as the output of IORbatch .
+
+11:   Define x := x̃(σ), r := r̃(σ), α := α̃(σ), e := ẽ(σ).
+12:   V outputs
+                x = ({(y α , xα , vα )}α , {(y β , xβ , vβ )}β , {(xγ , vγ )}γ , x, r, α, e),
+                y = ([[x̃∪ ]], {[[m̃∪,i ]]}i∈[µ] , {[[m̃i ]]}i∈[µ] ).
+
+
+        Fig. 7: Interactive oracle reduction IORfold-SPS from R2acc to Racc .
+
+
+
+                                                      48
+P’s inputs: f, q̃(X), w̃(X)
+V’s inputs: f, q̃(X)
+ 1:   P → V : w̃(X)
+ 2:   V checks if f ({q̃(Bits(j), X)}s−1                   n−1
+                                     j=0 , {w̃(Bits(j), X)}j=0 ) = 0.
+
+
+
+            Fig. 8: Special-sound protocol Πgate for the gate identity
+
+
+
+
+P’s inputs: σ, w̃(X)
+V’s inputs: σ
+ 1:   P → V : w̃(X)
+ 2:   V checks if w̃(x) − w̃(σ(x)) = 0 for all x ∈ {0, 1}log µ .
+
+
+           Fig. 9: Special-sound protocol Πwire for the wiring identity
+
+
+
+
+P’s inputs: p̃(x), w̃(X)
+V’s inputs: p̃(x)
+ 1:   P → V : w̃(X)
+ 2:   V checks if p̃(x) = w̃(0log µ+log n−log m , x) for all x ∈ {0, 1}log m .
+
+
+        Fig. 10: Special-sound protocol Πpi for the instance consistency
+
+
+
+
+                                             49
+P’s inputs: pp, i, x, y; w
+V’s inputs: pp, i, x, y
+Interaction phase.
+ 1:    Parse x = (α, v, r) and y = ([[ũ0 ]], [[ũ1 ]]).
+                              1
+                              X
+ 2:    P computes u :=              ˜ i (r) · ui and its oracle [[ũ]].
+                                    eq
+                              i=0
+
+ 3:    P → V : [[ũ]].
+ 4:    V → P : α1 , . . . , αs ←$ Flog(1/ρ)+log n .         // out-of-domain samples
+ 5:    P computes µ1 , . . . , µs ∈ F where µj := ũ(αj ).
+ 6:    P → V : µ1 , . . . , µs .
+ 7:    V samples b1 , . . . , bt ←$ {0, 1}log(1/ρ)+log n
+ 8:    V queries ũ(bj ), ũ0 (bj ), ũ1 (bj ) for all j ∈ [t].
+                                     1
+                                     X
+ 9:    V checks that ũ(bj ) =             ˜ i (r) · ũi (bj ) for all j ∈ [t].
+                                           eq
+                                     i=0
+
+Output phase.
+10 :   V outputs the new instance-oracle pair
+         ′                                                      ′
+       x := ({(αj , µj )}j∈[s] , {(bj , ũ(bj ))}j∈[t] ), y := [[ũ]].
+
+
+         Fig. 11: Oracle batching protocol NIRbatch based on linear codes
+
+
+
+
+                                                     50
+                                   17                                                            20                                                         300
+                                                HyperNova                                                 HyperNova                                                       HyperNova
+   Constraints # in log2 scaling
+
+
+
+
+                                                Quasar                                                    Quasar                                            250
+                                                                                                                                                                          Quasar
+                                   16                                                            18
+
+
+
+
+                                                                                                                                                memory/MB
+                                                                                                                                                            200
+                                                                                        time/s
+
+
+                                   15                                                            16
+                                                                                                                                                            150
+
+                                   14                                                            14
+                                                                                                                                                            100
+
+
+                                   13                                                            12                                                          50
+                                        1       2       3       4       5       6                     1   2      3      4      5        6                         1       2       3       4       5       6
+                                                # arity in log2 scaling                                   # arity in log2 scaling                                         # arity in log2 scaling
+
+(a) Curve-based instantiation (Mercury on BN256): Left: constraint count for accu-
+mulation verification. Middle: accumulation of proving time. Right: peak accumulation
+prover memory. We compare Quasar against HyperNova while varying the arity ℓ.
+
+                                                 Arc                                                      Arc                                                              Arc
+   Constraints # in log2 scaling
+
+
+
+
+                                                                                                 55                                                         3,500
+                                   19.5          Quasar                                                   Quasar                                                           Quasar
+                                                                                                                                                            3,000
+                                    19                                                           45
+                                                                                                                                                memory/MB
+
+
+
+
+                                                                                                                                                            2,500
+                                                                                        time/s
+
+
+
+
+                                   18.5
+                                                                                                 35                                                         2,000
+                                    18
+                                                                                                                                                            1,500
+                                                                                                 25
+                                   17.5                                                                                                                     1,000
+
+                                    17                                                           15                                                          500
+                                            1       2       3       4       5       6                 1    2      3      4          5       6                         1       2       3       4       5       6
+                                                    # arity in log2 scaling                                # arity in log2 scaling                                            # arity in log2 scaling
+
+(b) Code-based instantiation (FRI with Poseidon-Merkle): Left: constraint count for
+accumulation verification. Middle: accumulation prover time. Right: peak accumulation
+prover memory. We compare Quasar against Arc while varying the arity ℓ.
+
+                                        Fig. 12: Comparison of curve-based and code-based instantiations.
+
+
+
+
+                                                                                                                 51
+Inputs: (pk, {x(k) , w(k) }k∈[ℓ] ).
+                                     (k)
+ 1:     For each k ∈ [ℓ], set m1 ← Psps (x(k) , w(k) ).
+                                X
+ 2:     Compute x̃∪ (Y , X) :=    ˜ k−1 (Y ) · x̃(k) (X).
+                                  eq
+                                     k∈[ℓ]
+                                           X                             (k)
+ 3:     Compute m̃∪,1 (Y , X) :=                   ˜ k−1 (Y ) · m̃1 (X).
+                                                   eq
+                                           k∈[ℓ]
+
+ 4:     Set C∪ := Commit(ck, x̃∪ (Y , X)),                     C∪,1 := Commit(ck, m̃∪,1 (Y , X)).
+ 5:     r1 ← Hash(C∪ , C∪,1 ).
+ 6:     For i ∈ [2, µ]:
+                                            (k)                                  (k)
+       a:    For each k ∈ [ℓ], set mi ← Psps (x(k) , w(k) , {mj , rj }i−1
+                                                                      j=1 ).
+                                  X                 (k)
+       b:    Set m̃∪,i (Y , X) :=    ˜ k−1 (Y ) · m̃i (X).
+                                     eq
+                                     k∈[ℓ]
+
+       c:    Set C∪,i := Commit(ck, m̃∪,i (Y , X)).
+       d:    ri ← Hash(ri−1 , C∪,i ).
+                                                  log m
+                                                          −1
+ 7:     α := rµ ,    α := (α, α2 , . . . , α2                  ).
+ 8:     r sc ← Hash(α).
+ 9:     NI sum-check (over Y ):
+                         X
+10 :    Define x̄(Y ) :=   ˜ k−1 (Y ) · x(k) .
+                           eq
+                            k∈[ℓ]
+                                                          X                      (k)
+11 :    For each i ∈ [µ], define m̄i (Y ) :=                        ˜ k−1 (Y ) · mi .
+                                                                    eq
+                                                          k∈[ℓ]
+
+12 :    Define G(Y ) := F (x̄(Y ), {m̄i (Y )}i∈[µ] , r F ) · eq(Y
+                                                             ˜    , r sc ).
+                                                                         X
+13 :    Run a (log ℓ)-round non-interactive sum-check for                                      G(y) = 0,
+                                                                                y∈{0,1}log ℓ
+
+  obtaining sum-check polynomials {Gj (Y )}j∈[log ℓ] and challenges τ ∈ Flog ℓ .
+14 :    Set e := Glog ℓ (τlog ℓ ).
+15 :    Set x̃(X) := x̃∪ (τ , X).
+16 :    For all i ∈ [µ], set m̃i (X) := m̃∪,i (τ , X) and Ci := Commit(ck, m̃i (X)).
+17 :    (r x , r w ) ← Hash(r sc , {Ci }i∈[µ] ).
+18 :    Output proof π consisting of:
+       message x̃; commitments C∪ , {C∪,i }i∈[µ] , {Ci }i∈[µ] ;
+       challenges α, τ , r sc , r x , r w ; sum-check {Gj (Y )}j∈[log ℓ] , e.
+
+
+Fig. 13: The prover algorithm NIRcast-SPS .P for the non-interactive reduction.
+
+
+
+
+                                                           52
+Inputs: (vk, {x(k) }k∈[ℓ] , π).
+ 1:    Parse π as x̃, C∪ , {C∪,i }i∈[µ] , {Ci }i∈[µ] , α, τ , r sc , r x , r w , {Gj (Y )}j∈[log ℓ] , e.
+ 2:    Recompute SPS challenges:
+ 3:    r1 ← Hash(C∪ , C∪,1 ).
+ 4:    ri ← Hash(ri−1 , C∪,i ) for all i ∈ [2, µ].
+ 5:    Recompute sum-check challenges:
+ 6:    r ′sc ← Hash(α); reject if r ′sc ̸= r sc .
+ 7:    τj′ ← Hash(Gj (Y )) for all j ∈ [log ℓ]; reject if τ ′ ̸= τ .
+ 8:    Check sum-check consistency:
+ 9:    Reject if G1 (0) + G1 (1) ̸= 0.
+Reject if Gj+1 (0) + Gj+1 (1) ̸= Gj (τj ) for any j ∈ [log ℓ − 1].
+10 :   Check final value:
+11 :   Reject if e ̸= Glog ℓ (τlog ℓ ).
+12 :   (r ′x , r ′w ) ← Hash(r sc , {Ci }i∈[µ] ); reject if mismatch.
+13 :   x is the coefficient vector of x̃(X).
+14 :   Output instance xacc := (x, {C∪,i }i∈[µ] , C∪ , {Ci }i∈[µ] , {ri }i∈[µ] , α, τ , r x , r w , e).
+
+
+Fig. 14: The verifier algorithm NIRcast-SPS .V for the non-interactive reduction
+
+
+
+
+                                                    53
+Inputs: (pk, {(x(k)    (k)
+                acc , wacc )}k∈{0,1} ).
+
+ 1:    For each k ∈ {0, 1}, define vec(k) as
+       vec(k) := (x(k) ∥r (k) ∥α(k) ∥τ (k) ∥r (k)  (k)
+                                              x ∥r w ∥
+                           (k)                   (k)
+          (e(k) , vx(k) , v1 , . . . , vµ(k) )∥m1 ∥ · · · ∥m(k)
+                                                            µ ).
+                                   1
+                                   X                                        1
+                                                                            X                (k)
+ 2:             ˜
+       Compute vec(Z) :=                 ˜ k (Z) · vec(k) , x̃∪ (Z, X) :=
+                                         eq                                       ˜ k (Z) · x̃∪ .
+                                                                                  eq
+                                   k=0                                      k=0
+
+ 3:    For all i ∈ [µ], compute:
+                        1
+                        X                                               1
+                                                                        X
+                                             (k)                                           (k)
+       m̃i (Z, X) :=             ˜ k (Z) · m̃i , m̃∪,i (Z, Y , X) :=
+                                 eq                                           ˜ k (Z) · m̃∪,i .
+                                                                              eq
+                        k=0                                             k=0
+
+ 4:           ˜
+       Parse vec(Z) as x̃(Z), r̃(Z), α̃(Z), τ̃ (Z), r̃ x (Z), r̃ w (Z), ẽ(Z), ṽx (Z),
+       ṽ1 (Z), . . . , ṽµ (Z), m̃1 (Z), . . . , m̃µ (Z).
+ 5:    γ, rz ← Hash({x(k)
+                      acc }k∈{0,1} ).
+
+ 6:    Define:
+       p1 (Z) := x̃∪ (Z, r̃ x (Z)) − ṽx (Z),
+                  X                                          
+       p2 (Z) :=       powi (γ) · m̃i (Z, r̃ w (Z)) − ṽi (Z) ,
+                   i∈[µ]
+                    X                                                        
+       p3 (Z) :=           powµ+i (γ) · m̃∪,i (Z, τ̃ (Z), r̃ w (Z)) − ṽi (Z) ,
+                   i∈[µ]
+                                                                               
+       p4 (Z) := pow2µ+1 (γ) · F (x̃(Z), {m̃i (Z)}i∈[µ] , r̃(Z), α̃(Z)) − ẽ(Z) .
+ 7:                ˜ z , Z) · (p1 (Z) + p2 (Z) + p3 (Z) + p4 (Z)).
+       Set G(Z) := eq(r
+ 8:    1-round NI sum-check over Z ∈ {0, 1}:
+                            X
+ 9:    Run NI sum-check for    G(z) = 0,
+                                       z∈{0,1}
+
+       obtaining polynomial G1 (Z), σ ∈ F, and claim vG := G(σ).
+10 :   Set ηx := p1 (σ),
+       ηi := m̃i (σ, r̃ w (σ)) − ṽi (σ), η∪,i := m̃∪,i (σ, τ̃ (σ), r̃ w (σ)) − ṽi (σ) for all i ∈ [µ].
+11 :   Run 2µ + 1 instances of IORbatch .P in parallel and obtain
+       {y α , xα , vα }α , {y β , xβ , vβ }β , {xγ , vγ }γ .
+12 :   Output x := ({y α , xα , vα }α , {y β , xβ , vβ }β , {xγ , vγ }γ , x, r, α, e),
+13 :           y := ([[x̃∪ ]], {[[m̃∪,i ]]}i∈[µ] , {[[m̃i ]]}i∈[µ] ),
+14 :           π containing (G1 , σ, vG ) and the batching transcripts.
+
+
+   Fig. 15: The prover algorithm NIRfold .P for the non-interactive reduction
+
+
+
+
+                                                       54
+Inputs: (vk, {x(k)
+               acc }k∈{0,1} , π).
+
+ 1:    Parse π to obtain (G1 (Z), σ, vG ) and the batching transcripts.
+ 2:    (γ, rz ) ← Hash({x(k)
+                         acc }k∈{0,1} ).
+
+ 3:    Check 1-round sum-check:
+  Reject if G1 (0) + G1 (1) ̸= 0.
+  σ ′ ← Hash(G1 (Z)); reject if σ ′ ̸= σ.
+  Reject if vG ̸= G(σ).
+ 4:  Check aggregated identity:
+                                 X               X                                 
+  Reject if vG ̸= eq(r
+                  ˜ z , σ) · ηx +   powi (γ) ηi +   powµ+i (γ) η∪,i + pow2µ+1 (γ) ηF .
+                                      i∈[µ]             i∈[µ]
+
+ 5:    Run 2µ + 1 instances of IORbatch .V in parallel and verify {y α , xα , vα }α ,
+  {y β , xβ , vβ }β , {xγ , vγ }γ .
+ 6:    Compute x := x̃(σ), r := r̃(σ), α := α̃(σ), e := ẽ(σ).
+ 7:    Output x, y as in Figure 15.
+
+
+  Fig. 16: The verifier algorithm NIRfold .V for the non-interactive reduction.
+
+
+
+
+                                              55
+

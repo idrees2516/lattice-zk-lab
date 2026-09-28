@@ -1,0 +1,2809 @@
+               ProtogaLattice: Lattice-based Algebraic Folding
+
+                        David Balbás1 , Anca Nitulescu2 , and Maxime Plançon3
+                                         1
+                                             ETH Zürich, Zurich, Switzerland
+                                                2
+                                                  Input Output, France
+                                              3
+                                                Input Output, Switzerland
+
+
+
+      Abstract. Folding schemes are gaining traction recently as they are suited to prove streaming com-
+      putations with low memory footprint. In particular, there has been a growing interest in post-quantum
+      folding schemes for more expressive relations, and with improved proof sizes. While the landscape is
+      vast, every lattice-based construction, such as Latticefold+, (Super)Neo, and Cyclo, heavily rely on the
+      sumcheck protocol. Sumcheck gives efficient proving times, but the verifier circuits become very large,
+      partially because of the many random oracle invocations required. When folding sequential computa-
+      tions, this significantly inflates the recursive overhead, as the prover must run the verification at every
+      iteration.
+           We present ProtogaLattice, a new lattice-based folding scheme for general high-degree polynomial
+      relations that drastically reduces the size of the verifier’s circuits. Our folding backbone deviates from
+      the sumcheck approach and uses algebraic techniques. Our contribution is twofold:
+      i) a folding scheme that combines multiple instances of polynomial relations into accumulators for a
+      bounded number of iterations, and
+      ii) a bootstrapping protocol to reduce the norm of the witnesses underlying these accumulators, which
+      can be used in complement to our bounded-depth folding scheme to unlock unlimited depth.
+           A full iteration of ProtogaLattice for witnesses of length 230 gives a 4ˆ shorter proof size than the
+      state-of-the-art, with only 8.13 KB. Additionally, ProtogaLattice requires less random oracle evaluations
+      and achieves a smaller verifier circuit than its sumcheck counterparts.
+           Our techniques open new directions towards building efficient lattice-based proofs for expressive
+      relations and that present small recursion overheads, challenging the established sumcheck-based ap-
+      proaches.
+
+
+1   Introduction
+
+Folding Schemes, first introduced by Nova [KST22], allow one to accumulate multiple instances of
+an NP relation into a single small instance while preserving satisfiability. As a better alternative
+to classical recursive proof systems, such techniques unlock efficient instantiations of incrementally
+verifiable computation (IVC) [Val08] or proof carrying data (PCD) [CT10].
+    Works that build recursive proof schemes [BCMS20,BCL` 21] show how to amortize the recursive
+costs by aggregating some parts of the proof, while the recursive statement only checks that the
+aggregation was done correctly. These ideas were further developed into more efficient ways to
+accumulate statements and defer hard computations, which led to the emergence of multiple folding
+schemes.
+    Recently, numerous works have extended the folding paradigm, improving efficiency, generality,
+and modularity.
+    In a nutshell, folding schemes allow one to aggregate multiple instances of a computational
+relation into a single instance that captures their joint validity via the reduction of knowledge
+abstraction [KP23]. To illustrate reductions of knowledge, let Ξ and Ξ ˚ be two instance–witness
+relations. We denote instances by t and their corresponding witnesses by w. A reduction of knowl-
+edge from Ξ to Ξ ˚ is an interactive protocol Π between a prover and a verifier with the following
+structure: the verifier takes as input an instance t1 for Ξ, interacts with the prover, and outputs an
+instance t2 for Ξ ˚ . The security property of reductions of knowledge ensures that if the prover can
+subsequently produce a valid witness w2 (such that pt2 , w2 q P Ξ ˚ ), then there exists an efficient
+extractor that recovers a valid witness w1 (such that pt1 , w1 q P Ξ).
+    Then, a folding scheme for k witnesses is simply a reduction of knowledge tailored to accumu-
+lations, which goes from a product relation Ξ ˚ ˆ Ξ k Ñ Ξ ˚ . Here, Ξ is the base relation and Ξ ˚ is
+an accumulation relation whose instance compactly represent prior computation steps.
+    To construct IVC, the prover can fold a sequence of computation steps into a single accumulator
+instance whose size remains essentially fixed, which leads to memory-efficient proving. At the end
+of the computation, it suffices to prove knowledge of a witness for the final Ξ ˚ instance.
+    Folding schemes are characterized by their expressiveness, which is essentially the class of rela-
+tions that they can fold. Given a witness w and an instance t, a general relation takes the form
+
+
+                                 Ξ “ tpt, wq : f pwq “ 0 ^ t “ cmpwqu ,
+
+
+where f is a polynomial map of total degree at most d, and cm is an additive homomorphic
+commitment scheme. Depending on the form of f , a folding scheme may capture standard constraint
+systems used in succinct arguments such as R1CS, Plonkish, CCS, or even arbitrary polynomial
+constraints. Generally, supporting large d and arbitrary polynomial maps f is preferred as it enables
+more efficient arithmetizations, improving the practicality.
+    Without aiming to be exhaustive4 , we categorize folding schemes in two big families:
+    Algebraic folding schemes define the folding step as a closed algebraic transformation on the rela-
+tion itself, so each fold is implemented by evaluating and linearly combining polynomial constraints
+on the relation witnesses directly. Then, the verifier combines the instances leveraging an additive
+homomorphic commitment scheme. Examples include Nova [KST22] and FLIP-and-Prove [NPR26]
+for quadratic relations, and Protostar [BC23] and Protogalaxy [EG23] for high-degree, arbitrary
+polynomial relations.
+     Sumcheck-based folding schemes such as Hypernova [KS24] or FLI [GM24] phrase the fold-
+ing as a claim about a big polynomial (or about products of multilinear polynomials) and then
+use the sumcheck protocol to reduce the claim to a small number of scalar checks, so the heavy
+lifting is in the interactive polynomial reduction rather than in an algebraic gadget. This is also
+the approach taken by all existing lattice-based folding schemes5 including Latticefold [BC25a],
+Latticefold+ [BC25b], Neo/SuperNeo [NS26], and Cyclo [GLLO26] for high-degree customizable
+constraint systems (CCS).
+    None of the above approaches is strictly better than the other. On the one hand, algebraic
+schemes give very structured accumulators, are more succinct, and, in general, have cheaper per-
+step verification (partially because the round-efficiency, with few random oracle calls), resulting
+in smaller recursive overheads for IVC. On the other hand, sumcheck-based schemes enjoy linear
+proving time in k for multi-folding (k ą 1).
+
+4
+  In particular, for readability we are omitting families of folding schemes that do not rely on additively homomorphic
+  commitments such as [BMNW25,BCFW25]
+5
+  Except for Lova [FKNP24], an algebraic folding scheme for the subset sum problem over the integers.
+
+
+                                                          2
+1.1     Lattice-based Folding
+
+Due to their plausible post-quantum security and to the capacity of supporting smaller (64-bit)
+fields natively, lattice-based folding schemes have seen lots of research activity in recent years.6
+All existing lattice-based folding schemes for high-degree relations work over rings of the form
+Rq “ Zq rXs{pΦq for a cyclotomic polynomial Φ “ X N ` 1 and follow the same high-level recipe:
+
+1. Depart from a high degree-d relation that can be captured by products of multilinear polyno-
+   mials, such as CCS [STW23]. Define witnesses wi for these relations with low norm, that is,
+   ||wi || ď B for some bound B.
+2. Commit to the wi ’s to be folded using Ajtai commitments [Ajt96], which are additively homo-
+   morphic and binding for low-norm committed vectors. Besides, use a range proof to show that
+   the committed wi ’s satisfy the norm bound ||wi || ď B.
+3. Reduce, via the sumcheck protocol, the initial degree-d relation to a series of evaluation claims
+   about multilinear (i.e. degree-1) polynomials. These claims are generally captured as a linearized
+   relation (e.g. Linearized CCS).
+4. Decompose the witnesses in some basis b to control the norm growth induced by the folding as
+   needed.
+
+    This elegant approach has been proven to be successful, but it is currently the only recipe
+for building lattice-based folding schemes with practical performance and which are expressive
+enough to capture high-degree relations. Besides, it presents two important limitations, which
+seem very intrinsic to the reliance on sumchecks. First, the high-degree relation used needs to be
+sumcheck-friendly. This prevents one from folding arbitrary transcripts determined by polynomial
+constraints, such as in algebraic folding schemes [BC23,EG23], which are more versatile and enable
+native folding of Plonkish and lookup relations without translation overheads. Second, sumcheck
+leads to large transcripts, many random oracle calls (e.g. Latticefold+ reports around 100 RO
+calls), and therefore a complex verifier circuit. When used in an IVC construction, all verifier
+operations, including evaluations of hash functions, have to be encoded in the prover circuit, which
+is a significant source of inefficiency.
+    Considering the state-of-the art in the lattice-based folding schemes, our work addresses the
+following question:
+      Can we build a lattice-based algebraic folding scheme that:
+                     (i) is round–efficient,
+                    (ii) communication–efficient,
+                   (iii) expressive for high-degree relations,
+                   (iv) and supports an unbounded number of folding iterations?
+
+1.2     Our Contributions
+
+We introduce ProtogaLattice, a new algebraic folding paradigm for folding arbitrary polynomial
+relations from lattice-based assumptions. Our new algebraic folding techniques offer small proofs,
+6
+    We remark that lattice-based folding techniques have also been applied to realize other families
+    of constructions, such as SNARKs [BS23,KLNO24,KLNO25,NDC` 24,Che25,KLN` 26], polynomial commit-
+    ments [AFLN24,CMNW24,NS24], and generally, range proofs.
+
+
+                                                   3
+low verifier circuit complexity and the ability to capture general relations (arbitrary-degree polyno-
+mial constraints) natively. These relations are defined by transcripts of special-sound protocols, like
+in [BC23,EG23], as they efficiently capture R1CS, CCS, Plonkish or lookup arithmetizations. We
+also present a novel method for norm-control, a witness bootstrapping protocol, that replaces the
+witness decomposition needed in sumcheck folding schemes. Our bootstrapping tool can be used
+complementary to our (bounded-norm) folding to unlock unbounded-depth folding composition for
+IVC applications.
+    Overall, our work displays a fresh, unexplored route towards building efficient lattice-based
+folding, challenging the assumption that sumcheck-based techniques are the only viable approach.
+Concretely, our contributions can be split into two main, independent protocols which we describe
+below.
+
+A lattice-based folding scheme for polynomial relations. Our first and main result, which
+we introduce in Section 5.2, is a folding protocol for arbitrary polynomial relations defined over the
+ring Rq “ Zq rXs{pX N ` 1q for a power-of-two N . Our folding protocol is a reduction of knowledge
+for relations Ξ acc ˆ pΞ fold qk Ñ Ξ acc . Here, Ξ acc is a relaxed relation for accumulators of bounded
+norm, and Ξ fold is the relation for fresh witnesses of bounded norm.
+    Our starting point is an attempt to carry out the techniques of algebraic folding schemes over
+groups, such as Protogalaxy [EG23], to the ring setting. In Protogalaxy, k witnesses w1 , . . . , wk
+are linearly combined into an accumulator w˚ using (univariate) Lagrange polynomials over a
+domain H of size k. Soundness and completeness rely on algebraic relations modulo the vanishing
+polynomial of H. Translating this to lattices, however, fails due to the norm expansion of the
+accumulator w˚ that results from evaluating the Lagrange polynomials. In particular, when using
+Ajtai commitments [Ajt96] where t “ Aw pmod qq is a homomorphic commitment to a small
+        q for a public matrix A P R
+w P Rm                                    κˆm , the commitment is no longer binding for w with large
+
+norm. As a workaround, we combine witnesses using multivariate polynomials instead. For this
+to work, we develop an analogous algebraic machinery using ideals over the ring Rq rX1 , . . . , Xk s
+and the corresponding Gröbner basis theory. We provide a more detailed technical overview in
+Section 5.1.
+    This gives us a relaxed folding scheme where the commitments satisfy only a relaxed binding
+property. For soundness to hold, our scheme requires the prover to provide a folding range proof
+for the fresh input witnesses (not on the accumulator) as shown in Cyclo [GLLO26].
+    We present our folding scheme as a modular framework composed by a relaxed folding pro-
+tocol and a folding range proof, that we model as reductions of knowledge [KP23]. We further
+instantiate our folding range proof by adapting the sumcheck-based ternary proof from Neo and
+SuperNeo [NS26]. This framework admits a broad class of folding range proofs, so any future im-
+provement on these schemes for lattices, such as an algebraic range proof with fewer rounds, could
+be plugged in to reduce the verifier circuit of ProtogaLattice even further.
+
+Norm control via witness bootstrapping. Our folding scheme can be iterated multiple times
+(we set parameters to support L “ 64 iterations), but eventually the norm of the accumulator grows
+too large to continue folding. Our second result is a bootstrapping protocol for reducing the norm of
+accumulators obtained from folding. This protocol can be used after many folding iterations, when
+the norm reaches the upper bound, to reset the running accumulator before continuing with more
+folding steps. Concretely, our bootstrapping protocol is a reduction of knowledge from ΞB acc Ñ Ξ acc ,
+                                                                                            1     B
+where the output norm bound B is smaller than the input norm bound B .       1
+
+
+
+                                                   4
+Efficiency evaluation. We also adopt a concrete set of parameters and evaluate our scheme for
+higher-degree relations and multiple instances to fold, for which we show the corresponding proof
+sizes in Table 1. A detailed discussion of the performance and more estimates can be found in
+Section 6.
+
+
+                                                            Proof Size (KB)
+                     Witness Size
+                                                  degpf q “ 2                    degpf q “ 5
+                                          k“1       k“2         k“3      k“1        k“2         k“3
+                     0.1 GiB („ 2 ) 30
+                                           8.13     14.44       25.36     8.88      27.09       110.86
+                     1.0 GiB („ 2 ) 33
+                                           9.03     17.05       29.03     9.78      30.55       118.07
+
+Table 1. Concrete proof sizes of ProtogaLattice for a folding depth L “ 64 and k fresh instances to fold for a relation
+defined by the polynomial-map f . We exclude the commitments and the instances and report only the proof, in line
+with [NS26,GLLO26,Osa26]. See Table 5 for more data.
+
+
+
+
+1.3   Concrete Efficiency and Related Work
+
+In Table 2, we provide a comparison between ProtogaLattice and prior lattice-based folding schemes
+for high-degree relations. We remark that while all these schemes support high-degree relations, they
+all provide performance numbers for quadratic relations (e.g. R1CS). Hence, for a fair comparison
+we also report efficiency numbers for folding one instance at a time for a degree-2 relation with
+ProtogaLattice.
+
+
+                              SuperNeo            Latticefold+          Cyclo               ProtogaLattice
+                              [NS26]              [BC25a]               [GLLO26]            (This paper)
+          Folded relation CCS/LCCS                CCS/LCCS              CCS/LCCS            Polynomial rela-
+                                                                                            tions (incl. CCS)
+          Techniques          HyperNova style HyperNova          style HyperNova style Multivariate
+                              sumcheck        sumcheck                 sumcheck        polynomial inter-
+                                                                                       polation
+          Range proof         Binary sumcheck Wider proof, uses Ternary     sum- Ternary sumcheck
+                              proof           ring monomials    check proof      proof
+          Folding Depth         8                  8                     64                 64
+                                                                        bounded             8 with bootstrap
+          Proof size         „100 KB              „100 KB               31.4 KB                6.52 KB
+          (|witness| “ 227 )
+          # Rounds            ą60                 „100                  „60                 „30
+Table 2. Comparison table between ProtogaLattice and prior lattice-based folding schemes for high-degree relations.
+We consider degree 2 relations (R1CS), witness size of total integer length 227 and only folding k “ 1 fresh instance
+at each step.
+
+
+
+
+                                                            5
+Concurrent work. PikkuFold [Osa26] advances the line of sumcheck-based folding schemes by inte-
+grating optimizations—such as challenge rejection sampling—that are also applicable to our con-
+struction. Its primary departure from prior work is its range proof module, which is designed to
+minimize the prover-to-verifier communication. While`this range ˘ proof module could fit our frame-
+work as well, it requires the verifier to operate on O λ log m bits of projection matrices, which
+                                                         2
+
+we estimate is at least tens of megabytes in practice. While generating such large matrices can be
+implemented very efficiently, the translation into constraints of such verifier circuit is presumably
+complex and adds significant overheads in the iterative setting.
+
+1.4    Summary and Open Problems
+Summary. In this work, we construct ProtogaLattice, a novel lattice-based folding scheme for high-
+degree polynomial relations that is round and communication efficient and allows for unbounded
+folding depth. ProtogaLattice supports folding k witnesses at a time (although efficiency degrades
+significantly for large k), and works by iteratively folding and bootstrapping witnesses to reduce
+their norm.
+    Our construction can be seen as a constant-round folding backbone to which an efficient range-
+proof mechanism can be attached, making it modular and flexible for instantiations. This represents
+a significant step forward in the design of low-round folding schemes for general relations.
+Open Problems. While ProtogaLattice shows a novel approach towards realizing efficient lattice-
+based folding for expressive general relations, there are some open questions that we consider
+interesting and leave as future work.
+
+1. Constant-Round Norm Check. ProtogaLattice provides a flexible constant-round folding module
+   to which any range proof available in the literature can be attached. We instantiate it with a
+   sumcheck-based range proof adapted from (Super)Neo [NS26]. To the best of our knowledge,
+   succinct range proofs with succinct verification from the literature follow either a split-and-fold
+   paradigm (RoK and Roll [KLNO25], RoK Paper SISsors [KLNO24]) or rely on the sum-check
+   protocol (LatticeFold+ [BC25b], SALSAA [KLOT25], RoKoko [KLN` 26]). All aforementioned
+   range proofs have a logarithmic number of rounds. Therefore, instantiations using one of these
+   schemes do not allow to fully realize the constant-round potential of the ProtogaLattice folding
+   backbone. We leave as an interesting open question the design of a constant-round range proof
+   that exploits the structure of ProtogaLattice.
+2. Zero-Knowledge. Depending on the context in which Protogalattice is used, it may be useful to
+   have a zero-knowledge variant of the scheme, or to study whether the scheme (or a modification
+   of it) satisfies the randomizing property introduced in [KS24] for the purpose of building zero-
+   knowledge IVC.
+
+2     Preliminaries
+
+2.1    Notation
+We denote by N the set of natural numbers ě 0. We denote the security parameter by λ P N. We
+call a function  negligible, denoted pλq “ neglpλq, if pλq “ Opλ´c q for every constant c ą 0, and
+call a function ppλq polynomial, denoted polypλq, if ppλq “ Opλc q for some constant c ą 0. We say
+that an algorithm is probabilistic polynomial time (PPT) if it consumes randomness and its running
+
+                                                  6
+time is bounded by some ppλq “ polypλq. For a finite set S, x Ð$ S denotes sampling x uniformly
+at random in S. For an algorithm A, we write y Ð Apxq for the output of A on input x. For two
+positive n, m P N, rn, ms is the set tn, n ` 1, . . . , mu, and rns is the set r1, ns. We denote vectors
+and matrices using bold fonts. For a vector x, xi denotes its i-th component, and for a matrix M,
+Mi,j denotes its pi, jq-th entry. We write 0k and 1k for the vectors of k zeros and ones respectively.
+We also write 0kˆk and Ikˆk for the zero matrices and the identity matrices of dimension k ˆ k
+respectively. Given two strings x, y, we denote their concatenation by x|y. We use the notation Ξ
+to denote an efficiently decidable binary relation. For pairs px, wq P Ξ we call x the statement and
+w the witness. We write Ξ “ tpx; wq : ppx, wqu to describe an NP relation. For ease in notation,
+we sometimes include the statement x as a part of the witness and omit it, i.e. Ξ “ tw : ppwqu.
+We denote the infinity norm simply by the operator || ¨ || “ || ¨ ||8 .
+
+2.2     Reductions of Knowledge
+We review the reductions of knowledge framework [KP23]. We adapt the definition from prior
+works [NS26,KLNO24] and, as is necessary in the lattice setting, decouple the relations used for
+completeness from those used for soundness (extraction).
+Definition 1 (Reduction of Knowledge). Let Ξ1 , Ξ2 be relations, called the folding relations,
+and let Ξ11 , Ξ21 be relations, called the extraction relations, satisfying Ξi Ď Ξi1 for i P t1, 2u. A
+reduction of knowledge from Ξ1 Ñ Ξ2 in the completeness direction and Ξ11 Ð Ξ21 in the soundness
+direction is a tuple of three PPT algorithms pG, P, Vq defined as follows:
+– Gp1λ , 1` q Ñ p: Takes a security parameter 1λ and a size bound 1` and outputs public parameters
+  p, which we assume are input to all algorithms.
+– Ppt1 , w1 q Ñ pt2 , w2 q: Takes as input an instance-witness pair pt1 , w1 q and interactively reduces
+  the task of checking pt1 , w1 q P Ξ1 to the task of checking pt2 , w2 q P Ξ2 , or returns K.
+– Vpp, t1 q Ñ t2 : Takes as input an instance t1 and interactively reduces the task of checking t1 to
+  the task of checking a new instance t2 .
+    We write xP, Vypt1 , w1 q Ñ pt2 , w2 q to denote the interaction between P, V. The reduction must
+satisfy the following properties:
+Completeness. For any admissible set of parameters λ, ` P N, given p Ð Gp1λ , 1` q and pt1 , w1 q Ð
+ Appq such that pt1 , w1 q P Ξ1 , the prover’s output instance must be equal to the verifier’s output
+ instance t2 , and PrrxP, Vypt1 , w1 q P Ξ2 s “ 1.
+Knowledge soundness. For any expected PPTadversary A, there exists an expected poly-time
+ extractor E with rewinding access to A such that if
+                                                 ˇ
+                                                 ˇ p Ð Gp1λ , 1` q
+                               »                                            fi
+                                                 ˇ                                  1
+                    pAq :“ Pr–pt2 , w2 q P Ξ21 ˇˇ t1 Ð Appq                fl ě         ,
+                                                 ˇ pt2 , w2 q Ð xA, Vypt1 q      polypλq
+
+ then                                        ˇ
+                                             ˇ p Ð Gp1λ , 1` q
+                           »                                     fi
+                                             ˇ
+                        Pr–pt1 , w1 q P Ξ11 ˇˇ t1 Ð Appq         fl ě pAq ´ neglpλq.
+                                             ˇ w1 Ð E A pp, t1 q
+Public coin. All verifier messages are bounded-length random messages, and the verifier does not
+ use any other random coins.
+
+                                                     7
+2.3       Cyclotomic rings
+
+Let N P N be a power of two. We denote by R :“ ZrXs{xX N ` 1y the power-of-two cyclotomic ring
+of dimension N . Let q ą 2 be a prime and denote by Rq :“ R{qR “ Zq rXs{xX N ` 1y where we
+represent Zq :“ t´tq{2u, . . . , tq{2uu. If q ” 1 ` 2d1 pmod 4d1 q for some d1 | N , it is well-known that
+Rq – FdqN {d1 via the Number Theoretic Transform (NTT).
+         1
+
+
+
+    For f “ iPrN s fi X i P Rq , we use cfpf q :“ pf0 , . . . , fN ´1 q P ZN   q to denote the coefficient
+               ř
+vector of f , and ctpf q :“ f0 is the constant term of f . For a vector f P Rnq , we denote by
+cfpf q :“ pcfpf0 qJ , . . . , cfpfn´1 qJ q P ZnˆN
+                                              q     the concatenation of the transposed coefficient vectors,
+and ctpf q “ pctpf0 q, . . . , ctpfn´1 qq P Znq is the first column of cfpf q.
+
+
+2.4       Sampling Sets
+
+Definition 2 (Sampling sets, [CCKP19]). For an arbitrary ring R, a subset C of R is a
+sampling set if the difference of any two distinct elements in C is not a zero divisor. C is further
+a strong sampling set if the difference is also invertible.
+
+Example: For R :“ Rq where q is a prime, Zq Ď Rq is a strong sampling set as the difference of
+any two distinct elements in this set is invertible in Rq .
+
+Expansion Factor. To ensure that homomorphic commitments remain binding, we need a strong
+sampling set Csmall Ď Rq such that for every c P Csmall and any v̂ P R, the norm of cv̂ will not
+increase much compared to }v̂}8 . To quantify this property, we define the expansion factor of
+Csmall Ď Rq as
+                                                             }c ˆ v̂}8
+                               }Csmall }op :“     sup                  .                     (1)
+                                              cPCsmall ,v̂PR   }v̂}8
+
+Lemma 1 (Generalized Schwartz-Zippel [BCPS18]). Consider a k-variate nonzero poly-
+nomial f P Rďd rX1 , . . . , Xk s over a ring R with per-variable degree at most d. Let C Ď R be a
+sampling set.
+   Then we have PrrÐ$C k rf prq “ 0s ď |C| dk
+                                              .
+
+Lemma 2 (Lyubashevsky–Seiler, power-of-two case). Let N and d1 be powers of two with
+1 ă d1 ď N , and let q be a prime satisfying q “ 1 ` 2d1 mod 4d1 . Then in the ring Rq “
+Zq rXs{pX N ` 1q we have the factorization
+
+                                             d   1
+                                             ź        1
+                                     N
+                                 X       `1“   pX N {d ´ ri q   pmod qq,
+                                                i“1
+
+
+for distinct ri P Fˆ
+                   q , so that each X
+                                      N {d ´ r is irreducible mod q.
+                                            1
+                                              i
+                                                                                       1{d1
+    Moreover, any non-zero ypXq “ i“0 yi X i P R is invertible in Rq if either }y}8 ă q? 1          or }y}2 ă
+                                      řN ´1
+                                                                                                d
+     1
+q 1{d .
+
+                                                      8
+2.5      Module SIS
+We recall the Module Short Integer Solution (MSIS) problem defined in [LS15,PR06,LM06,ACK21].
+We will focus on the `8 -norm.
+
+Definition 3 (Module SIS with `8 -norms [ACK21]). Let R :“ ZrXs{pX N ` 1q and Rq :“
+R{qR. On input A Ð$ Rκˆm
+                      q  , the goal of the MSIS8,q
+                                               κ,m,B problem is to find a non-zero x P R such
+                                                                                        m
+
+that }x}8 ď B and Ax “ 0 over Rq .
+
+   With the right choice of parameters, we can obtain a MSIS8,q
+                                                            κ,m,B problem with 128 bits of security
+[ESS` 19].
+
+2.6      Ajtai Commitments
+Let R :“ ZrXs{pX N ` 1q and Rq :“ R{qR where q P N is a prime. The commitment CMκ,m,B
+introduced by [Ajt96] works as follows:
+
+– KeyGenCompκ, mq Ñ A: sample a random matrix A Ð$ Rκˆm
+                                                      q   .
+– CompA, xq Ñ cm: given x P R as input, where }x}8 ď B, and no randomness, output cmpxq :“
+                             m
+
+  Ax mod q P Rκq .
+
+    Assuming that the MSIS problem MSIS8,q     κ,m,2B is hard it follows that CMκ,m,B satisfies the
+binding property for inputs }x}8 ď B: Any adversary that can open a commitment cm to two
+different openings x1 , x2 (with `8 -norm less than B), computes x1 ´ x2 ‰ 0 which is a solution to
+the MSIS8,q
+          κ,m,2B problem where }x1 ´ x2 }8 ă 2B.
+    In our results, to argue knowledge soundness of the folding schemes based on Ajtai commitments,
+we need the commitments to satisfy a relaxed binding property as defined in [ACK21,ALS20].
+
+2.7      Relaxed Binding Commitment
+Let C Ă Rq be a strong sampling set with expansion factor T . We say that the pair p∆, xq P
+pC ´ Cq ˆ Rm is a B-weak opening of cm if ∆ ¨ cm “ Ax mod q and }x}8 ď B. Informally, a
+commitment is B-relaxed binding if it is infeasible to find two different B-weak openings for
+the same commitment. The Ajtai commitment is B-relaxed binding if MSIS8,q        κ,m,4T B is hard: an
+adversary that outputs two B-weak openings p∆1 , x1 q, p∆2 , x2 q for the same commitment such that
+∆1 x2 ‰ ∆2 x1 breaks the MSIS8,q
+                             κ,m,4T B .
+
+
+3     Warm-up: Algebraic Folding and Protogalaxy
+
+Before getting into technicalities and the description of ProtogaLattice, we provide some intuition
+by presenting Protogalaxy, the (classical) algebraic folding scheme that served us as a starting point.
+We also introduce some notations that will be useful later. Protogalaxy [EG23] is a folding scheme
+which supports general polynomial relations.7 In a nutshell, it can fold k witnesses w1 , . . . , wk that
+ 7
+     Protogalaxy actually supports folding of transcripts of special-sound protocols, and so does our scheme ProtogaLat-
+     tice. For simplicity, here we introduce Protogalaxy for the case when special-sound protocol transcripts have only
+     one message, such as when folding vanilla R1CS or CCS. We refer to Definition 14 and Section B.1 for details—the
+     extension is fairly straightforward.
+
+
+                                                            9
+satisfy a base polynomial relation defined by
+                                  !       ˇ                     )
+                           Ξ :“ pt, wq ˇ t “ Compwq ^ f pwq “ 0n .                               (2)
+                                          ˇ
+
+for some polynomial map f “ pf1 , . . . , fn q : Fm Ñ Fn of degree d defined over a finite field F,
+and an additively homomorphic commitment scheme Comp¨q. Such witnesses are combined with an
+initial accumulator w0 into a fresh accumulator w˚ . Given w0 and then w1 , . . . , wk , the folding
+scheme works by defining a polynomial
+                                                      ÿ
+                                W pXq “ L0 pXqw0 `       Li pXqwi
+                                                         iPrks
+
+where L0 pXq, . . . , Lk pXq are a basis of Lagrange polynomials over some domain H of size k ` 1.
+Then, given a random challenge γ P F sent by the verifier, the prover sets w˚ “ W pγq as the
+new accumulator. This strategy minimizes the number of rounds of interaction between prover and
+verifier, which, when compiled via Fiat-Shamir, results into fewer random oracle calls and smaller
+verifier circuits.
+    For both completeness and soundness, the scheme critically     relies on the fact that Lagrange
+polynomials behave as linear functions modulo ZpXq “ aPH pX ´ aq, the vanishing polynomial
+                                                           ś
+over H. In short, this enables the prover to provide a quotient of f pW pXqq, which the verifier
+can validate via a linear check. We state the linearity lemma from [EG23, Lemma 4.2], which we
+formulate for arbitrary domains:
+
+Lemma 3. Let f : Fm Ñ F be a polynomial map and w1 , . . . , wk P Fm vectors. Let pLi qiPrks be the
+Lagrange basis over a domain H of size k and ZpXq the vanishing polynomial of H. Then, we have
+that                      ˜            ¸
+                            k
+                            ÿ               ÿk
+                        f     Li pXqwi “       Li pXqf pwi q mod ZpXq
+                             i“1                i“1
+                                                                                 ´ř               ¯
+Proof. It suffices to show that ZpXq divides the polynomial given by HpXq “ f       k
+                                                                                    i“1 L i pXqwi   ´
+
+  i“1 Li pXqf pwi q. To see this, note that given any j P rks, and taking aj P H, we have that
+řk
+Lj paj q “ 1 and Li paj q “ 0 for any i P rks, i ‰ j. Therefore,
+                                         ˜                ¸
+                                            k
+                                            ÿ                ÿk
+                              Hpaj q “ f        Li paj qwi ´     Li paj qf pwi q
+                                         i“1                i“1
+                                   “ f pLj paj qwj q ´ Lj paj qf pwj q “ 0
+
+As Hpaj q “ 0 for every j P rks, then ZpXq divides HpXq as claimed.                                [
+                                                                                                   \
+
+Accumulators. The relation satisfied by the accumulator is Ξrand , a relaxed relation. The lat-
+ter are customary in folding schemes, such as e.g. Relaxed R1CS [KST22,NBS23] or Linearized
+CCS [KS24,BC25a,NS26], but Protogalaxy has the peculiarity that accumulator relations are also
+high-degree relations. As opposed to witnesses, for which f pwq “ 0n , accumulators evaluate to a
+non-zero vector under f .
+    Formally, Protogalaxy can be stated as a reduction of knowledge Ξrand ˆ Ξ k Ñ Ξrand . We
+introduce the accumulator relation below.
+
+                                                   10
+Definition 4 (Structured randomized relation). The generalized randomized relation Ξrand
+is the subset Ξrand Ď pC ˆ Ft ˆ Fq ˆ Fm s.t.
+                                                               n
+                              !`               ˘ ˇˇ            ÿ                   )
+                   Ξrand :“        pt, β, eq, w ˇ t “ Compwq ^   powi pβqfi pwq “ e
+                                                                 i“1
+
+where the polynomials powi pβq :“          i“1 p1, βi q expand a seed β P F of length t “ rlog ns.
+                                        Ât                                 t
+
+
+     Note that this relation compresses the “rows” of f pwq using a vector of randomizers β P Ft . To
+prevent the vector β from having size n, which would result in a linear-time verifier, Protogalaxy re-
+lies on the power monomials function powi . This is a form of compressing β into a vector of size log n
+which still enables efficient re-randomization. In ProtogaLattice, we use the same randomization
+structure, except over ring elements.
+     For completeness, we include the full protocol description from [EG23] in Section B.
+
+
+4     Relations, Architecture and Range Proofs
+
+In this section, we present the relations and architecture of our folding scheme. The architecture’s
+formal description is presented at the end of the section in Figure 1. The folding backbone presented
+in Section 5 only allows the extractor to recover relaxed openings, thus we formally introduce the
+definition of Relaxed Folding Scheme (Definition 8). In Section 4.3 we define the Folding Range
+Proof module that is needed to make ProtogaLattice a tight folding scheme.
+
+
+4.1    Relations
+
+The two relations in Definition 5 below are the relations supported by ProtogaLattice. From a
+high-level, Ξf,n,B is the base relation (i.e., the relation satisfied by fresh witnesses) and Ξf,n,B
+                                                                                               acc   is
+the accumulator relation, both restricted to Ajtai commitments over modules.
+
+Definition 5. Let q be a prime, Rq be a cyclotomic ring, κ, n, m, B be integers. Let A P Rκˆm   q
+be an Ajtai commitment key and f : Rm      q Þ
+                                             Ý Ñ R  n be a polynomial map such that f p0 q “ 0 . We
+                                                    q                                   m     n
+define the input relation for the fresh witnesses as follows:
+                          #                                                         +
+                                                          Aw   “ t mod q, }w}  ď B,
+                              x “ t P Rκq ; w P Rm
+                            `                        ˘
+               Ξf,n,B :“                          q    :
+                                                          f pwq “ 0n
+
+And the relation for the accumulator as follows:
+                     $                                                                      ,
+                     ’
+                     ’                                                 Aw “ t mod q,        /
+                                                                                            /
+                     ’                                                                      /
+                                                                        }w} ď B
+                     ’
+                     &`                                                                     /
+                                                                                            .
+            acc
+                        x “ pt, β, eq P Rκ`log n`1
+                                                   ; w P Rm
+                                                            ˘
+          Ξf,n,B :“                      q                q   :        n                     .
+                     ’                                                 ÿ                   /
+                                                                         powi pβqfi pwq “ e/
+                     ’
+                     ’                                                                     /
+                                                                                           /
+                     ’
+                     %                                                                     -
+                                                                       i“1
+
+where powi pβq are as in Definition 4.
+   We omit the public parameters q, κ, m, p in the subscripts for the sake of readability.
+
+                                                     11
+    While the relations Ξf,n,B and Ξf,n,B
+                                    acc are our target statements, the extractors of our folding and
+
+bootstrapping backbones only recover a relaxed opening to the input commitments. More precisely,
+for an input commitment-witness pair pt, wq in Ξf,n,B or Ξf,n,B
+                                                            acc , both extractors output a witness w
+
+satisfying Aw “ t pmod qq, but w itself is of arbitrarily large norm. Rather, our extractor outputs
+a small factor s P Rq with bounded operator norm such that }sw} ď B. Definition 6 captures the
+notion of weak opening for both fresh instances and accumulators.
+
+Expressing usual constraint systems. The notation t “ Aw and f pwq “ 0n expresses usual con-
+straint systems such as R1CS and CCS without assuming any structure on them. As an example,
+we illustrate how R1CS translates to our relations. Let w “ px, win , 1q P Fm be a R1CS ex-
+tended witness such that Aw ˝ Bw ´ Cw “ 0n for matrices A, B, C P Fnˆm . Then, we can
+express such a R1CS relation in our constraint system by simply denoting t “ cmpwq and letting
+fi pwq “ aTi w ¨ bTi w ´ cTi w for each i P rns, which is a degree-2 polynomial map.
+    We remark that the notation t “ Aw is actually a simplification, as we can actually fold
+transcripts of (committed) special-sound protocol transcripts as described in Protostar [BC23].
+For these, we can fold committed transcripts pt0 , c1 , t1 , . . . , cµ , tµ q, where ti “ Awi and wi are
+the original prover messages. The advantage of these is that they additionally support complex
+Plonkish-like arithmetizations with lookups and range checks expressed in more rounds. We provide
+extensive details in the Supplementary Material A.2.
+
+Supporting field-native relations. ProtogaLattice is native to constraints expressed directly over the
+ring Rq , as the polynomial map f is defined over Rq . If the constraints are natively expressed over
+the field Fq instead, one needs to embed Fq constraints and witnesses into an equivalent formulation
+over rings. The naïve approach is to embed each Fq element as a single Rq element. This is valid
+but somewhat wasteful (Rq elements are much larger than Fq elements), so Latticefold [BC25a]
+instead embeds vectors a P Fdq into a single Rq element using the slots of the NTT transform. Pro-
+togaLattice is fully compatible with this approach. Other lattice-based folding schemes, including
+SuperNeo [NS26] and Cyclo [GLLO26], use a clever embedding technique that enables them to run
+the sumcheck prover over the field instead of over the ring. ProtogaLattice can be adapted to sup-
+port this embedding, at the cost of an additional reduction of knowledge as done in Cyclo [GLLO26,
+Section 2.6]. However, since ProtogaLattice does not run the sumcheck protocol, whether such an
+approach is beneficial for ProtogaLattice is unclear.
+
+
+4.2   Architecture of ProtogaLattice
+
+The architecture of our folding scheme (Figure 1) requires the fresh witnesses to go through a
+folding range proof (Definition 7) to allow the extractor to recover the original witnesses from the
+extracted relaxed openings of the folding and bootstrapping modules.
+    Informally, folding range proofs (Definition 7) relax the norm constraint }w} ď B to a norm
+constraint on a small multiple of the witness }sw} ď B at the cost of extra polynomial constraints.
+Notably, we require that there exists an extractor that finds the original w satisfying the tight
+norm constraint }w} ď B given relaxed openings pw, sq for an }s}op ď % where % ą 1.
+    The output relation of folding range proofs may include extra information in the instance, which
+we attach as xRP to the instance of our relations Ξf,n,B,%
+                                                    fold   and Ξf,n,B,%
+                                                                 acc    .
+
+
+
+                                                   12
+Definition 6. We use the notations of Definition 5 and let nRP , mRP be integers, % ě 1 and
+fRP : Rm RP ÞÝÑ RnRP be a polynomial map. We define the two following relaxed relations for fresh
+       q           q
+witnesses (Ξf,n,B,%
+              fold  ) and for accumulators (Ξf,n,B,%
+                                             acc     ):
+
+                  fold                                      acc
+                 Ξf,n,B,%   :“                             Ξf,n,B,% :“
+                 $´        `          ˘           ¯ ,      $´       `                ˘          ¯     ,
+                 ’
+                 ’
+                 ’   x  “     t, x RP  ; pw,  sq    :/
+                                                     /
+                                                     /
+                                                           ’
+                                                           ’
+                                                           ’   x “    t, x RP , β, e   ; pw, sq   :   /
+                                                                                                      /
+                                                                                                      /
+                 ’                                   /     ’                                          /
+                           κ               m                        κ              mRP
+                        R                R                   t P Rq , xRP P Rq ,
+                                                           ’                                          /
+                   t         ,  x            RP
+                                                ,
+                 ’                                   /
+                 ’
+                 ’
+                 ’   P     q      RP  P    q
+                                                     /
+                                                     /
+                                                     /
+                                                           ’
+                                                           ’
+                                                           ’
+                                                                                                      /
+                                                                                                      /
+                                                                                                      /
+                             m
+                                                           ’                                          /
+                                                             β P Rtq , e P Rq ,
+                 ’                                   /
+                   w      R    ,  s    R   ,
+                                                           ’                                          /
+                 ’
+                 ’
+                 ’
+                 &     P     q      P    q
+                                                     /
+                                                     /
+                                                     /
+                                                     .
+                                                           ’
+                                                           ’
+                                                           ’
+                                                                                                      /
+                                                                                                      /
+                                                                                                      /
+                                                           &w P R m
+                                                           ’                                          /
+                                                                     q , s P Rq ,
+                                                           ’                                          /
+                       }s}op ď %,                      ,                                              .
+                 ’
+                 ’                                   /
+                                                     /                                                    .
+                                                                  }s}op ď %,
+                 ’
+                       Aw “ t mod q,
+                 ’                                   /
+                                                     /     ’                                  /
+                 ’
+                 ’                                   /
+                                                     /     ’
+                                                           ’                                  /
+                                                                                              /
+                 ’                                   /     ’
+                                                           ’                                  /
+                                                                                              /
+                                                                  Aw “ t mod q, }sw} ď B,/
+                 ’                                   /
+                 ’
+                 ’
+                 ’     }sw} ď B,                     /
+                                                     /
+                                                     /
+                                                           ’
+                                                           ’
+                                                           ’
+                                                           ’
+                                                                                              /
+                                                                                              /
+                                                                                              /
+                 ’
+                 %                                   /
+                                                     -     ’       n                          /
+                       f pxRP , wq “ 0n                    ’
+                                                           ’      ÿ                           /
+                                                                                              /
+                                                                     powi pβqfi pxRP , wq “ e /
+                                                           ’
+                                                           ’                                  /
+                                                           ’
+                                                           %                                  /
+                                                                                              -
+                                                                  i“1
+      We omit the following public parameters q, κ, m, mRP , p in the subscript for the sake of readability.
+
+
+4.3     Folding Range Proof
+Definition 7. We use the notations of Definitions 5 and 6 and let nRP , mRP be integers and
+                                                                   RP is a folding range proof
+fRP : Rm RP ÞÝÑ RnRP be a polynomial map. An interactive protocol Π
+       q         q
+when ΠRP is a reduction of knowledge
+
+                                                  Π
+                                        Ξf,n,B ÝÝÝÝÝRP    fold
+                                                    ÝÝÝÑ Ξpf,f RP q,n`nRP ,B,1
+
+
+in the completeness direction and
+
+                                                  ΠRP     fold
+                                        Ξf,n,B ÐÝÝÝÝÝÝÝÝ Ξpf,f RP q,n`nRP ,B,%
+
+
+in the knowledge soundness direction.
+
+Definition 8. We use the notations of Definitions 5 to 7 and let k, Bext , γ, γ 1 be integers. An
+interactive protocol Πrel_fold is a relaxed folding scheme when Πrel_fold is a reduction of knowledge
+
+                                      fold                    Πrel_fold
+                                    pΞf,n,B,1 qk ˆ Ξf,n,γ,1
+                                                    acc                 acc
+                                                            ÝÝÝÝÝÝÝÝÑ Ξf,n,γ 1 ,1
+
+
+in the completeness direction and
+
+                                 fold                               Πrel_fold
+                               pΞf,n,B ext ,%
+                                              qk ˆ Ξf,n,γ
+                                                    acc
+                                                          1 `kB ,% Ð
+                                                               ext
+                                                                              acc
+                                                                    ÝÝÝÝÝÝÝÝ Ξf,n,γ 1 ,1
+
+
+in the soundness direction.
+
+   Composing ΠRP with Πrel_fold recovers the fresh witnesses tightly, thanks to the folding range
+proof. The accumulator, however, needs no range proof in ProtogaLattice’s architecture. This is
+because the accumulator is not extracted but reconstructed. We can do this thanks to the application
+
+                                                             13
+   w1 P Ξf,n,B                         w1fold P Ξffold
+                                                    YfRP ,n`nRP ,B,1
+
+
+
+
+   w1 P Ξf,n,B                        w1fold P Ξffold
+                                                   YfRP ,n`nRP ,Bext ,%
+
+
+
+
+   w2 P Ξf,n,B                         w2fold P Ξffold
+                                                    YfRP ,n`nRP ,B,1
+
+
+
+
+   w2 P Ξf,n,B        Folding         w2fold P Ξffold
+                                                   YfRP ,n`nRP ,Bext ,%
+                      Range
+                       Proof
+         ..                                           ..                      Relaxed-
+          .                                            .                      Folding
+
+
+
+
+   wk P Ξf,n,B                         wkfold P Ξffold
+                                                    YfRP ,n`nRP ,B,1
+
+
+
+
+   wk P Ξf,n,B                        wkfold P Ξffold
+                                                   YfRP ,n`nRP ,Bext ,%
+
+                                                                                                 1
+                                         wacc P Ξfacc
+                                                   YfRP ,n`nRP ,γ,1                      wacc P Ξfacc
+                                                                                                   YfRP ,n`nRP ,γ 1 ,1
+
+
+
+
+      wacc P Ξfacc
+                YfRP ,n`nRP ,γ,1        wacc P Ξfacc
+                                                  YfRP ,n`nRP ,Bext ,%
+                                                                                                 1
+                                                                                         wacc P Ξfacc
+                                                                                                   YfRP ,n`nRP ,γ 1 ,1
+
+
+
+
+Fig. 1. Folding scheme from Folding Range Proof + Relaxed-Folding architecture. Black arrows represent protocol
+inputs and protocol outputs in the completeness direction. Red arrows represent protocol inputs and outputs in the
+soundness (extraction) direction. Dotted red arrows represent the extraction of the accumulator that ProtogaLattice
+can carry out without additional explicit range checks. Notations follow Definitions 5 to 8.
+
+
+of Cyclo’s trick [GLLO26], i.e., combining the accumulator with a coefficient 1. Then, subtracting
+the (tight) fresh witnesses from the output accumulator yields it directly.
+    In the following result, we show that for folding schemes applying Cyclo’s trick, such as Proto-
+gaLattice, the construction Πfold in Figure 1 is a tight folding scheme.
+
+Corollary 1. We use the notations from Definitions 5 to 8. Let ΠRP be a folding range proof and
+Πrel_fold a relaxed folding scheme such that the output accumulator is computed as
+                                                    ÿ
+                                        w˚ “ w0 `       cj wj
+                                                                   jPrks
+
+for some coefficients cj determined by the transcript. Then Πfold of Figure 1 is a folding scheme
+
+                                                                          Π
+                          pΞf,n,B qk ˆ Ξfacc
+                                          YfRP ,n`nRP ,γacc ,1 Ð   ÝÑ Ξfacc
+                                                                ÝÝfold   YfRP ,n`nRP ,γ 1 ,1 ,
+
+where γacc “ γ 1 ` 2kT B.
+
+                                                              14
+Proof (Sketch). The proof is fairly straightforward, so we omit the full details. The goal is to show
+that the extractor returns tight witnesses for all k`1 inputs, including the accumulator. Essentially,
+the extractor of the folding scheme runs the extractor of Πrel_fold to obtain relaxed openings for
+the k fresh inputs, and the extractor of ΠRP to remove their slack. Combined, they yield  řwitnesses
+wj with ptj ; wj q P Ξf,n,B for every j P rks. For the accumulator, setting w0 :“ w ´ jPrks cj wj
+                                                                                     ˚
+
+gives us that, by linearity, Aw0 “ t0 , where }w0 } ď γ 1 ` 2kT B. The fact that the accumulator is
+valid follows from a similar argument to Section D.4. We remark that no rewinding is needed in
+this step.
+
+5     ProtogaLattice
+
+5.1    Overview of Our Techniques
+                                                                                  acc
+We want to build an algebraic folding scheme from lattices for the two relations Ξf,n,γ,1    fold
+                                                                                          ˆpΞf,n,B,1 qk Ñ
+ acc
+Ξf,n,γ 1 ,1 defined in Definition 5 where the accumulator w is defined as
+                                                           ˚
+
+
+                                                   k
+                                                   ÿ
+                                        w˚ pXq “         Li pXqwi .
+                                                   i“0
+
+   We begin by investigating the simpler case k “ 1. When folding one fresh witness w1 with an
+accumulator w0˚ , we end up with an accumulator w1˚ as follows:
+
+                                   w1˚ “ LpXqw0˚ ` p1 ´ LpXqqw1 .
+
+In this simple case, we can choose H “ t0, 1u, then LpXq “ X. In other words, for a small challenge
+γ P C, the linear combination coefficients are γ and 1 ´ γ, which are both small. With C Ă Rq a
+strong sampling set of small elements, T the expansion factor of C, and B the norm bound for both
+w0˚ and w1 , we obtain
+                                        }w1˚ } ď p2T ` 1qB.
+However, this approach does not scale for more than k “ 1, as the Lagrange polynomials are of
+degree k, blowing up the norm. Hence, if we have k fresh witnesses w1 , . . . , wk and one accumulator
+w0˚ , we can proceed recursively and fold each of the wj ’s with the previous accumulator. Specifically,
+for all j P rks, we have the following recursive accumulator
+
+                                    wj˚ :“ Xj wj´1
+                                               ˚
+                                                   ` p1 ´ Xj qwj ,
+
+where Xj is the indeterminate for the evaluation of the degree-1 Lagrange polynomials at the
+challenge γj of the j-th folding step.
+   Our goal, however, is to support folding multiple witnesses at once. For this, we explicitly study
+the sequence pwj˚ qjPr0,ks in Lemma 4, which gives us the closed formula
+                                ¨       ˛         ¨                   ˛
+                                  źk           ÿk              k
+                                                               ź
+                          wk˚ “ ˝    Xj ‚w0 `     ˝p1 ´ Xj q       X` ‚ wj .
+                                 j“1            j“1               `“j`1
+
+We notice that if all the challenges pγj qjPrks are drawn independently from C, the coefficient c0
+of the first witness w0 (since it is the first one, we have w0 “ w0˚ ) is the product of all γj ’s,
+
+                                                   15
+thus cś
+      0 has coefficients of size OpN
+                                     k´1 q. Fortunately, Lemma 4 also provides a change of variables
+
+Yj :“ `“j`1 Xj , which simplifies the closed form of wk˚ to the following
+        k
+
+
+                                                    k
+                                                    ÿ
+                                    wk˚ “ Y0 w0 `        pYj ´ Yj´1 qwj .
+                                                    j“1
+
+    Next, we wish to turn the above relation into a folding scheme for k witnesses and an accumu-
+lator, with a single-round challenge py0 , . . . , yk´1 q Ð C k .
+
+Multivariate polynomials for folding over rings. A crucial fact needed to pack all the folding
+iterations is the following: the first two rounds (with the random challenges α, δ) only need to be
+completed once at the beginning of the k iterations, provided that the commitments to all the
+witnesses w0 , . . . , wk are sent prior to α and δ.
+     The last major challenge is to establish a generalization for the core relation over Lagrange
+polynomials Lemma 3 over the rings. We provide such a generalization in Theorem 1. Recall that
+intuitively, Lemma 3 claims that the composition of a polynomial map f and the linear combination
+defined by the Lagrange polynomials behaves as a linear function within the interpolation domain
+(i.e. modulo the vanishing polynomial). In the univariate case, the vanishing ideal of H is the
+principal ideal xZy, but in our multivariate case, the vanishing ideal I (see Definition 9) that
+we consider has instead 2k ´ 1 generators. After a careful analysis of I, we establish a reduced
+Gröbner basis G (generalized to rings, see Section D.1) in Proposition 1. From a very high-level, a
+reduced Gröbner basis (even over a ring) allows to perform Euclidean division, with guarantees on
+uniqueness of the remainder and quotient. The latter properties are enough to extend the univariate
+Protogalaxy to our multivariate setting.
+
+5.2   ProtogaLattice’s Algebraic Folding PGL-Fold
+We present the main folding protocol in Figure 2. We start by introducing a technical lemma that
+finds a closed-form expression for accumulators.
+
+Lemma 4. Consider k ` 1 vectors w0 , . . . , wk P Rm
+                                                   q and k variables X1 , . . . , Xk . For all j P rks,
+define
+                              wj˚ “ Xj wj´1   ˚
+                                                 ` p1 ´ Xj qwj .
+We have the following closed form for wk˚ :
+                              ¨       ˛       ¨               ˛
+                                k
+                                ź           k
+                                            ÿ            k
+                                                         ź
+                       wk˚ “ ˝     Xj ‚w0 `   ˝p1 ´ Xj q   X` ‚ wj .
+                                 j“1            j“1                 `“j`1
+
+
+Equivalently, with respect to the variables Yj :“         `“j`1 Xj for all j P r0, ks, we have
+                                                    śk
+
+                                                    k
+                                                    ÿ
+                                    wk˚ “ Y0 w0 `        pYj ´ Yj´1 qwj .
+                                                    j“1
+
+
+Notice that Yk “
+                   śk
+                    `“k`1 X` “ 1.
+
+
+                                                    16
+Proof. We define the sequence pwj˚ qjPrks as follows:
+1. w0˚ “ w0
+2. For all j P rkswj˚ “ Xj wj´1
+                            ˚   ` p1 ´ Xj qwj .
+We prove by induction on k that:
+                            ¨       ˛       ¨               ˛
+                              źk          k
+                                          ÿ            k
+                                                       ź
+                      wk˚ “ ˝    Xj ‚w0 `   ˝p1 ´ Xj q   X` ‚ wj .
+                                       j“1                j“1               `“j`1
+
+
+Initialization. For k “ 1, we have w1˚ “ X1 w0˚ ` p1 ´ X1 qw1 . The formula for the closed form of
+w1˚ gives:
+                               ¨       ˛          ¨                  ˛
+                                 ź1            ÿ1             ź1
+                         w1˚ “ ˝    Xj ‚w0 `      ˝p1 ´ Xj q      X` ‚ wj
+                                        j“1               j“1                `“j`1
+
+                                   “ X1 w0 ` p1 ´ X1 q ¨ 1 ¨ w1 ,
+
+thus the formula holds for k “ 1.
+Induction. We have wk`1
+                    ˚   “ Xk`1 wk˚ ` p1 ´ Xk`1 qwk`1 . We substitute wk˚ and obtain:
+                     »¨        ˛          ¨                 ˛ fi
+                         źk            ÿk             źk
+           ˚
+         wk`1 “ Xk`1 –˝     Xj ‚w0 `      ˝p1 ´ Xj q     X` ‚wj fl ` p1 ´ Xk`1 qwk`1
+                               j“1                 j“1               `“j`1
+                  ¨           ˛               ¨                       ˛
+                     k`1
+                     ź                    k
+                                          ÿ                  k`1
+                                                             ź                               k`1
+                                                                                             ź
+                “˝          Xj ‚w0 `          ˝p1 ´ Xj q            X` ‚ wj ` p1 ´ Xk`1 q            Xj wk`1
+                      j“1                j“1                `“j`1                            `“k`2
+                  ¨           ˛                ¨                       ˛
+                     k`1
+                     ź                   k`1
+                                         ÿ                   k`1
+                                                             ź
+                “˝          Xj ‚w0 `           ˝p1 ´ Xj q           X` ‚ wj ,
+                      j“1                j“1                `“j`1
+
+which completes the proof.                                                                                     [
+                                                                                                               \
+
+Definition 9. Let Y “ pY0 , . . . , Yk´1 q. For all i, j P r0, k ´ 1s, we define the polynomial
+
+                                                Zij pYq :“ Yi pYj ´ 1q.
+
+Furthermore, we define the ideal I Ă Rq rYs as
+
+                                  I “ xZ0,0 , . . . , Zk´1,k´1 , Z1,0 , . . . , Zk´1,k´2 y
+
+Theorem 1. Let f : Rm   q Ñ Rq be a polynomial map of degree d and w0 , . . . , wk P Rq . We
+                                                                                             m
+
+furthermore assume that the Yj ’s and the 1 ´ Yj ’s are either invertible elements in Rq or 0. Then
+the following holds:
+               ˜                          ¸ ˜                                     ¸
+                        ÿk                                  ÿk
+              f Y0 w0 `    pYj ´ Yj´1 qwj ´ Y0 f pw0 q `       pYj ´ Yj´1 qf pwj q P I.
+                             j“1                                           j“1
+
+
+                                                            17
+For better readability, we relegate the proof to Appendix D.2.
+
+Proposition 1 (Gröbner basis of I). Recall that Zi,j pYq “ Yi Yj ´ Yi and M “ Rq rYs. Let
+G :“ tZi,j , 0 ď j ď i ď k ´ 1u and
+                                                                              ÿ
+              SpGq “ tpQij qi,jPr0,k´1s P pRq rY0 , . . . , Yk´1 sqkpk`1q{2 ,   Qij Zij “ 0u
+                                 jďi                                      i,jPr0,k´1s
+                                                                              jďi
+
+be the set of syzygies of G. Let R be a set of coset representatives of M{I and S be a set of coset
+representatives of the set of Mkpk`1q{2 {SpGq.
+    The set G is a reduced Gröbner basis of I. More specifically, for all P P M, there exists a unique
+remainder R P R and a unique vector of quotients pQij qi,jPr0,k´1s P S such that
+                                                                    jďi
+                                                ÿ
+                                       P “                 Qij Zij ` R.
+                                             i,jPr0,k´1s
+                                                 jďi
+
+   For the sake of clarity, we may omit the heavy subscript and write pZij qij for pZij qi,jPr0,k´1s
+                                                                                                 jďi
+when it is clear from context.
+
+   Note that G Ď I, since the relations Yi`1 Yi “ Yi`1 give Yi Yj “ Yi for every j ď i by induction.
+Hence, every Zij with j ď i lies in I. Thus G generates I even though it is strictly larger than the
+generating set of Definition 9.
+
+On the practical cost of computing a reduction modulo I. The reduced Gröbner basis explicitly
+given in Proposition 1 has a very rich structure which enables significant implementation speedups.
+More precisely, since G contains Zii for all i P r0, k ´ 1s, we have Yi2 “ Yi thus Yiα “ Yi for any
+exponent α ě 1, i.e all powers are reduced to 1. Additionally, G contains Zij for all j ď i, thus any
+product of two variables Yi Yj is reduced to its variable of highest index Ymaxti,ju . Combining both
+remarks, we obtain that for a monomial of the form M “ Y0α0 ¨ ¨ ¨ Yk´1       , M ’s remainder modulo G
+                                                                        αk´1
+
+is simply Ymaxti st αi ‰0u . Finally, we note that these polynomials are small as their size is constant
+on m or n, so this reduction does not dominate in the overall prover time.
+
+Linear norm growth for the accumulator. Iteratively folding by applying a linear combination
+with random weights to the witnesses to be fold results in a multiplicative norm growth for the
+output accumulator w˚ in the number of folding steps. At each iteration, the prior accumulator is
+multiplied by a constant coefficient, carrying the increasing norm further. Specifically, at iteration
+`, w`˚ is constructed as a linear combination in which one of the terms is c0 w`´1 ˚ , therefore, at
+
+each new folding step, the norm of the accumulator is multiplied by a constant factor that is the
+operator norm of c0 .
+    First step is to apply the key technique to reduce norm growth introduced by Cyclo [GLLO26]
+in sum-check based folding schemes. The idea behind Cyclo’s trick is that the extractor only needs
+k independent challenges to recover k ` 1 (relaxed) input witnesses. Since one of the challenges
+can be fixed, we fix the coefficient c0 to 1, thus reducing the norm growth from exponential to
+linear in the recursive depth. Unfortunately, the trick does not apply straightforwardly to us, as
+the coefficients of our k ` 1 witnesses in the output accumulator are already determined by only k
+
+                                                     18
+independent challenges. This is due to the partition of unity property of the Lagrange polynomials
+(that is, they always sum to 1).
+    Our solution is to artificially increase by 1 the number of independent challenges, allowing us to
+fix the accumulator’s coefficient to 1. In our supported relations, in line with most arithmetizations
+(e.g R1CS or CCS), the constraints polynomial f is homogenous, i.e. f p0q “ 0. Since the zero
+witness is in the input relation and its commitment is also a zero vector, it follows that we can fold
+a ”ghost” zero witness without changing the protocol. Rather, the only difference is that a new
+variable Yk is appended to the list of challenges, therefore the last coefficient is Lk pYq “ Yk ´ Yk´1
+instead of 1 ´ Yk´1 , which is exactly what is needed.8
+
+Definition 10 (Multivariate Lagrange polynomials for Cyclo’s trick). Let k be a posi-
+tive integer. We define our multivariate Lagrange polynomials over RrY0 , . . . , Yk s as L0 pYq “ Y0 ,
+Lk`1 pYq “ 1 ´ Yk and for all j P rks, Lj pYq “ Yj ´ Yj´1 .
+
+The proof of Proposition 1 can be found in Appendix D.3. We now state the main theorem and
+refer the reader to the Appendix D.4 for the proof.
+
+Theorem 2. Let λ be a security parameter, C Ă Rq be a strong sampling set, B be a norm bound
+for the fresh input witnesses, γ be a norm bound for the accumulator and γ 1 “ γ ` p2kT ` 1qB.
+    Under the hardness of MSIS8,qκ1 ,m,2p2T q2k p2γ 1 `Bq
+                                                          , PGL-Fold (Figure 2) is a reduction of knowledge
+
+                                      fold
+                                    pΞf,n,B,1 qk ˆ Ξf,n,γ,1
+                                                    acc                acc
+                                                            ÝÝÝÝÝÝÝÝÑ Ξf,n,γ 1 ,1
+
+                                  fold
+                                pΞf,n,B ext,%
+                                              qk ˆ Ξf,n,B
+                                                    acc
+                                                          ext ,%
+                                                                            acc
+                                                                 ÐÝÝÝÝÝÝÝÝ Ξf,n,γ 1 ,1 .
+
+
+
+
+5.3    A Witness Bootstrapping Protocol
+
+Witness decomposition for non-linear relations. Despite the integration of Cyclo’s trick to
+PGL-Fold, the output accumulator w˚ ’s norm is still linearly growing with each folding step. This
+restricts the recursive composition to a bounded folding depth. We overcome this, with a new norm
+bootstrapping technique unlocking unbounded folding composition for any IVC application.
+    We propose a so-called witness bootstrapping protocol, which is a reduction of knowledge
+                                           acc                   acc
+                                          Ξf,n,γ 1 ,1 ÝÝÝÝÝÝÝÝÑ Ξf,n,γ,1
+                                           acc                   acc
+                                          Ξf,n,γ 1 ,% ÐÝÝÝÝÝÝÝÝ Ξf,n,γ,1
+
+for γ ď γ 1 . In other words, our witness bootstrapping protocol takes an accumulator of norm γ 1
+and returns another accumulator with a lower norm γ, thus allowing the folding to continue.
+     The witness bootstrapping protocol plays a similar role as the witness decompositions in Lat-
+ticeFold(+) and (Super)Neo. In those schemes, a witness w with norm bound γ 1 is decomposed in
+k 1 witnesses in basis b as follows
+                                                 1 ´1
+                                                kÿ
+                                           w“         bj wj ,
+                                                         j“0
+
+8
+    Additionally, there is a polynomial Lk`1 pYq “ 1 ´ Yk , though it is multiplied by a zero-witness, so it does not
+    actually contribute to the accumulator.
+
+
+                                                          19
+     Prover input: Public parameters, one accumulator instance-witness pair ppt0 , xRP  0 , β, eq; w0 q P Ξf,n,γ,1 ,
+                                                                                                            acc
+
+     k instance-witness pairs pptj , xj q; wj qjPrks P pΞf,n,B,1 q
+                                      RP                 fold      k
+
+     Verifier input: Public parameters, accumulator instance pt0 , xRP
+                                                                     0 , β, eq, k instances ptj , xj qjPrks
+                                                                                                   RP
+
+
+
+      Prover                          ˆ RP ˙                                  Verifier
+                                       xj
+      Define @j P r0, ks, ωj “                                                Check Hpti q “ 1 @i P rks
+                                       wj
+      Let Y “ pY0 , Y1 , . . . , Yk q                                         δÐC
+                                                              δ
+                                                         ÐÝÝÝÝÝÝÝÝÝÝ
+                          t´1
+      δ Ð pδ, δ 2 , . . . , δ 2 q
+                  řn
+      F pXq :“         powi pβ ` Xδqfi pω0 q
+                 i“1
+                                                           F1 , . . . , F t
+                                                         ÝÝÝÝÝÝÝÝÝÝÑ
+                                                                              αÐC
+                                                              α
+                                                         ÐÝÝÝÝÝÝÝÝÝÝ
+      @i P rts, βi˚ :“ βi ` αδi
+                  n                   ´ř             ¯
+                                        k
+                     powi pβ ˚ q ¨ fi
+                 ř
+      HpYq :“                           j“0 Lj pYqωj
+                 i“1
+      Compute pKrs q1ďsďrďk such that:
+                                                                                             t
+                                                                                                   Fi α i
+                      ř                                                                      ř
+      HpYq “ F pαq `      Krs pYqZrs pYq                                      F pαq “ e `
+                          r,sPrks                                                            i“1
+                            sďr
+                                                            pKrs qrs
+                                                         ÝÝÝÝÝÝÝÝÝÝÑ
+                                                                              Check deg pKrs q ď d ´ 2
+                                                                              y0 Ð 1
+                                                                              py1 , . . . , yk q Ð C k
+                                                           y1 , . . . , y k
+                                                         ÐÝÝÝÝÝÝÝÝÝÝ
+      Update witness:
+      w˚ “ kj“0 Lj pyqwj
+            ř
+
+      Update commitment:                                                      Update commitment:
+      t˚ “ kj“0 Lj pyqtj                                                      t˚ “ kj“0 Lj pyqtj
+           ř                                                                       ř
+
+      Update instance:                                                        Update instance:
+      xRP,˚ “ kj“0 Lj pyqxRP                                                  xRP,˚ “ kj“0 Lj pyqxRP
+              ř                                                                       ř
+                          j                                                                       j
+       ˚     ř                                                                 ˚     ř
+      e “       Krs pyqZrs pyq ` F pαq                                        e “       Krs pyqZrs pyq
+            r,sPrks                                                                r,sPrks
+              sďr                                                                    sďr
+                                                                                `F pαq
+
+                                       acc                       acc
+Fig. 2. Folding protocol PGL-Fold:Ξf,n,γ,1         fold
+                                              ˆ pΞf,n,B,1 qk Ñ Ξf,n,γ 1 ,1 . The check Check Hpti q “ 1 @i P rks is only
+
+necessary if the relation is given by a special-sound protocol with at least 1 round; see Section A.2 for details.
+
+
+
+
+                                                              20
+where bk ě γ 1 ´ 1. Since the relations considered by those schemes are linear, connecting the
+         1
+
+
+relations satisfied by the wj ’s and that of w is straightforward. In our case, for an accumulator
+instance-witness pair ppt, β, eq, wq P Ξf,n,γ
+                                          acc
+                                                1 ,1 , the relation is not linear, thus connecting the ej ’s
+
+defined as follows
+                                                        ÿn
+                                  @j P rk 1 s, ej :“       powi pβqfi pwj q
+                                                         i“1
+to e is not trivial. Our idea is to rely Theorem 1, our generalization of Lemma 3 to multivariate
+polynomials.
+    For clarity, we explain the intuition in the univariate case. Let us assume that there exists an
+evaluation point D such that for all j P rk 1 s, we have Lj pDq “ bj´1 . It follows that under Lemma 3,
+we have
+                                        k 1
+
+                                                                                                        (3)
+                                        ÿ
+                                              bj´1 ej “ e ` ZpDqKpDq,
+                                        j“1
+
+for a quotient K. Summing up, the protocol that we obtain so far looks as follows: first, the prover
+decomposes w in base b and obtains w1 , . . . ,`wk1 . Then, he ˘computes the commitments tj “ Awj ,
+and the errors ej such that for all j P rk 1 s, ptj , β, ej q; wj P Ξf,n,b,1
+                                                                       acc   . Next, the prover computes
+the polynomial                                           ˜ 1             ¸
+                                       ÿn                   ÿk
+                             HpXq :“        powi pβqfi          Lj pXqwj ,
+                                              i“1                  j“1
+
+and the quotient K of H in the division by Z. The prover sends K to the verifier, who checks that
+Equation (3) holds. There are at least two problems with the aforementioned construction:
+1. The prover needs to convince the verifier that K is correctly formed,
+2. For a given b, there may not exist a tuple D satisfying for all j P rk 1 s Lj pDq “ bj´1 .
+We solve the first problem by actually finishing the folding of the wj ’s: after receiving K, the verifier
+                                                          1 ´1
+                                                         kř
+sends a challenge γ and thus creates a witness w˚ :“           Lj pγqwj that satisfies
+                                                                    j“0
+
+                                n
+                                ÿ                             k1 ´1
+                                                               ÿ
+                                      powi pβqfi pw˚ q “              Lj pγqej “: e˚ .
+                                i“1                           j“0
+
+After a careful analysis, we find that the well-formedness of K is ensured by the soundness of the
+folding of the wj ’s into w˚ .
+    The second problem comes  ř 1 from the fact that the sum of the Lagrange polynomials is constant
+equal to 1, therefore when kj“1 bj´1 ‰ 1 (this condition is always satisfied for practical values of
+b), no such D exists. Similarly to PGL-Fold, the bootstrapping protocol PGL-Boot also folds a ghost
+zero-witness that artificially increases the number of independent challenges. This enables us to get
+an extra degree of freedom, and we can set D as follows:
+                                              j
+                                              ÿ
+                                      Dj “          bi “ pbj`1 ´ 1q{pb ´ 1q
+                                              i“0
+
+After careful analysis in Theorem 3, the intuitive overview presented in the univariate case extends
+to the multivariate case, and yields the protocol PGL-Boot presented in Figure 3.
+
+                                                         21
+Prover input: Public parameters, one accumulator instance-witness pair ppt0 , xRP
+                                                                               0 , β, eq; w0 q P Ξf,n,γ 1 ,1 ,.
+                                                                                                  acc
+
+
+Verifier input: Public parameters, accumulator instance pt, xRP
+                                                             0 , β, eq.
+
+
+
+Prover                                                                           Verifier
+                                        řk1 ´1
+Compute base b decomposition                     w j bj
+                                          řj“0
+                                             1
+Compute base b decomposition kj“0              ´1 RP j
+                                                 xj b
+                                ˆ RP ˙
+                                   xj
+Let @j P r0, k ´ 1s, ωj “
+               1
+                                    wj
+Define Y :“ pY0 , Y1 , . . . , Yk1 ´1 q
+Commit @j P r0, k1 ´ 1s,   ř tj “ Awj
+@j P r0, k1 ´ 1s, ej “          powi pβqfi pωj q
+                         iPrns
+           řn               ´  řk1 ´1              ¯
+HpYq :“       powi pβqfi         j“0    Lj pYqω  j
+           i“1
+Compute pKrs q0ďsďrďk1 ´1 such that:
+      ř 1 ´1
+HpYq “ kj“0
+                         ř
+             Lj pYqej ` r,s Zrs pYqKrs pYq
+
+                                                  ptj , ej qjPr0,k1 ´1s , pKrs qrs
+                                                         ÝÝÝÝÝÝÝÝÝÝÑ
+
+                                                                                 Check deg pKrs q ď d ´ 2
+                                                                                             ř 1 ´1 j ?
+                                                                                 Check kj“0           b tj “ t
+                                                                                             řk1 ´1 j ?
+                                                                                 Check j“0 b ej “ e
+                                                                                            ř
+                                                                                        ` rs Zrs pDqKrs pDq
+                                                                                 y0 Ð 1
+                                                                                                             1
+                                                                                 py1 , . . . , yk1 ´1 q Ð C k ´1
+                                                           y1 , . . . , yk1 ´1
+                                                          ÐÝÝÝÝÝÝÝÝÝÝ
+Define for all j P r0, k1 ´ 1s                                                   Define for all j P r0, k1 ´ 1s
+    cj “ Lj pyq                                                                      cj “ Lj pyq
+
+Update witness:
+      ř 1 ´1
+w˚ “ kj“0    cj wj
+Update commitment:                                                               Update commitment:
+     ř 1 ´1                                                                           ř 1 ´1
+t˚ “ kj“0   cj tj                                                                t˚ “ kj“0   cj tj
+Update instance:                                                                 Update instance:
+       ř 1 ´1                                                                           ř 1 ´1
+xRP,˚ “ kj“0    Lj pyqxRP
+                       j                                                         xRP,˚ “ kj“0    Lj pyqxRP
+                                                                                                        j
+ ˚   ř                                                                            ˚   ř
+e “ r,s Krs pyqZrs pyq                                                           e “ r,s Krs pyqZrs pyq
+      ř 1 ´1                                                                           ř 1 ´1
+    ` kj“0   cj ej                                                                   ` kj“0   cj ej
+
+                                                                    acc           acc
+                   Fig. 3. Witness Bootstrapping protocol PGL-Boot:Ξf,n,γ 1 ,1 Ñ Ξf,n,γ,1 .
+
+
+
+
+                                                            22
+Theorem 3. Let k 1 ě 2 an integer, b “ rpγ 1 ´ 1q1{k s, γ “ p2T pk 1 ´ 1q ` 1qb the target bound for the
+                                                                    1
+
+
+output accumulator, and D P Rkq ´1 be the evaluation tuple such that @j P r0, k 1 ´ 1s, Lj pDq “ bj .
+                               1
+
+
+    Under the hardness of MSIS8,q
+                              κ1 ,m,2pk1 ´1qp2T q2k1 γp2γ 1 q
+                                                              , PGL-boot defined in Figure 3 is a reduction
+of knowledge
+                                            acc                   acc
+                                           Ξf,n,γ 1 ,1 ÝÝÝÝÝÝÝÝÑ Ξf,n,γ,1
+                                      acc                               acc
+                                     Ξf,n,γ             k1   ÐÝÝÝÝÝÝÝÝ Ξf,n,γ,1 ,
+                                              ext ,p2T q
+
+
+where γext :“ pk 1 ´ 1qγp2T qk p2γ 1 q.
+                                 1
+
+
+
+
+6     Performance and Efficiency Estimates
+
+In this section, we provide explicit formulae for the proof sizes of PGL-Fold and PGL-Boot, then
+we provide concrete parameter settings and efficiency estimates for PGL-Fold. We summarize the
+parameters involved in this paper in a glossary Table 3.
+
+            Notation                           Description                           Instantiation example
+                q                           Prime modulus                                  log q » 64
+               N                     Degree of the cyclotomic ring                              32
+               d1                      Number of the CRT fields                                  4
+               κ          Height of the commitment matrix for fresh inputs                      54
+               κ1      Height of the commitment matrix for accumulator input                    54
+               n                      Number of ring constraints                              224.4
+                t                             t :“ rlog ns                                      25
+               m                   Length of the witness (over Rq )                           224.4
+                d                             Degree of f                                        2
+               k                      Number of fresh witnesses                                  1
+               k1                Number of decomposition witnesses                             —
+               L        Maximum number of folding steps without PGL-Boot                        64
+               B                  Fresh input witnesses norm bound                        1 (ternary)
+               γ                    Input accumulator norm bound                               —
+               γ1                  Output accumulator norm bound                               —
+                b                  Decomposition basis in PGL-Boot                             —
+               BC                    Range of challenge coefficients                            16
+               C                             Challenge set                               t´7, ¨ ¨ ¨ , 8uN
+               T                        Expansion factor of C                                  480
+
+Table 3. Glossary parameter table, showing notation, description and a concrete instantiation choice for PGL-Fold.
+We do not give concrete numbers for PGL-Boot-only parameters since we do not instantiate it explicitly.
+
+
+
+
+6.1    Concrete sizes of PGL-Fold and PGL-Boot
+All quantities are originally measured in arbitrary integers, arbitrary ring elements, or arbitrary
+challenge set elements. For each of these sets, we write | ¨ |bit the theoretical bit-size of elements of
+this set. We have
+
+                 |Zq |bit “ log q,     |Rq |bit “ N log q,              |C|bit “ N log2 pBC ` 1q “ λ,
+
+                                                               23
+where BC :“ 2λ{N ´ 1 is the smallest range of challenge coefficients such that the challenge set
+C “ r´rBC {2s ` 1, rBC {2ssN satisfies |C| “ 2λ . We note that the `8 -operator-norm of challenges is
+upper bounded by T :“ N BC .
+
+
+                           PGL-Fold                               PGL-Boot
+
+              Commitments κ1 ` k κ N log q
+                           `        ˘
+                                                                  k1 κ1 N log q
+              Instance               RP
+                           ´ ` 1q |x `|bit ` pt˘¯
+                           pk                   ` 1q N log q      k 1
+                                                                  ´ |x
+                                                                        RP
+                                                                           |bit ` pt ` 1q N log q
+                                                                                       ˘¯
+              Prover msgs.
+                                                                      1 1
+                               kpk`1q k`d´2                          k pk ´1q k1 `d´3
+                                                                               `
+                             t` 2          k
+                                                  N log q                2       k1 ´1
+                                                                                          N log q
+              Challenges     pk ` 2q |C|bit                       pk1 ´ 1q |C|bit
+              Rounds         3                                    1
+
+              MSIS bound
+                                                 `              ˘       1`              ˘`               ˘
+                             p2T q2k pk2 ` k ` 1q γ ` p2kT ` 1qB p2T q2k pk1 q2 ` k1 ` 1 γ ` p2k1 T ` 1qb
+
+Table 4. Theoretical sizes, in bits, of the two protocols. Here t :“ rlog ns, d :“ deg f , k is the number of fresh
+instances folded per step and k1 the number of decomposition witnesses.
+
+
+
+
+6.2   Concrete Instantiation
+We compute various sets of parameters for PGL-Fold together with the range proof described in
+Section C that reach λ “ 128 computational bits of security, estimating the hardness of MSIS via
+the lattice-estimator library [APS15]. We target L “ 64 folding steps.
+     We include the cost of the most efficient range proof available to our scheme, which we detail
+in Section C. Since this range proof is fit to prove that the input witnesses are ternary, i.e with
+infinity norm bound B “ 1, we compensate to make a fair comparison by increasing the integer
+length mN to reach identical witness bit-length as other schemes. Concretely, our witness size of
+0.108 GiB corresponds to Cyclo’s benchmark witness of integer dimension 227 with norm bound
+210 . For concrete instantiations, we conservatively assume that κ “ κ1 , i.e that the commitment key
+that we use to commit to every fresh witness is the same as the commitment key used to commit
+to the final large accumulator.
+     The results presented in Table 5 show that the concrete communication of PGL-Fold is very
+efficient (under 10 KB) for degree-2 relations (e.g R1CS) and one fresh witness at a time (k “ 1),
+and scales slightly faster than linearly with k. We note that part of the scaling with k is due to
+the constant number of folding steps L “ 64, not number of fold-able witnesses. The effective
+number of foldable witnesses is given by kL, which hinders the efficiency of multi-folding. Another
+significant contribution to the total size as k grows is the exponential extraction slack in k` due to
+the integration of Cyclo’s linear-growth trick. Notably, the communication cost scales with k`d´2    ,
+                                                                                                    ˘
+                                                                                                 k
+therefore high-degree relations (e.g degpf q “ 5) are barely more expensive than degree-2 relations
+for k “ 1, but scale very poorly as k grows.
+
+On the Usage of AI Tools
+We have not used generative AI to produce any of the contents in this paper, except for formatting
+of some tables and diagrams and for reviewing the consistency of some notation. The only exception
+is Section C, where we have used AI tools to import notation and equations from other papers.
+
+                                                         24
+         degpf q     witness k     logpqq κ      λ    log2 pBMSIS q Commit. Inst. Proof Total
+                   size(GiB)                                         (KB)   (KB) (KB) (KB)
+
+            2        0.108     1    64     54 128.4         53.2       27.0       6.3     8.13     41.4
+            2        0.108     2    120    58 130.1         75.2        81.6      11.7    14.44   107.7
+            2        0.108     3    192    59 128.8         96.5       177.0      18.8    25.36   221.2
+            5        0.108     1    64     54 128.4         53.2       27.0       6.3     8.88     42.2
+            5        0.108     2    120    58 130.0         75.2        81.6      11.7    27.09   120.4
+            5        0.108     3    192    59 128.8         96.5       177.0      18.8   110.86   306.7
+            2         1.0      1    64     57 129.6         54.5       28.5       7.0     9.03    44.53
+            2         1.0      2    128    56 129.5         76.5        84.0      14.0    17.05   115.1
+            2         1.0      3    200    58 128.5         97.8       181.3      21.9    29.03   232.2
+            5         1.0      1    64     57 129.6         54.5       28.5       7.0     9.78     45.3
+            5         1.0      2    128    56 129.5         76.5        84.0      14.0    30.55   128.6
+            5         1.0      3    200    58 128.5         97.8       181.3      21.9   118.07   321.3
+
+Table 5. Parameter selection and concrete sizes of PGL-Fold with the range proof described in Section C, targeting
+number of folding steps L “ 64.
+
+
+
+
+Acknowledgements
+David Balbás did part of this research while at IMDEA Software Institute and while doing an
+internship at Input-Output. We thank Michał Osadnik for helpful discussions on lattice-based
+folding.
+
+
+
+
+                                                       25
+                                               References
+
+
+[ACK21]   Thomas Attema, Ronald Cramer, and Lisa Kohl. A compressed Σ-protocol theory for lattices. In Tal
+          Malkin and Chris Peikert, editors, CRYPTO 2021, Part II, volume 12826 of LNCS, pages 549–579,
+          Virtual Event, August 16–20, 2021. doi:10.1007/978-3-030-84245-1_19.
+[AFK22]   Thomas Attema, Serge Fehr, and Michael Klooß. Fiat-Shamir transformation of multi-round interactive
+          proofs. In TCC 2022, Part I, LNCS, pages 113–142, November 2022. doi:10.1007/978-3-031-22318-1_
+          5.
+[AFLN24] Martin R. Albrecht, Giacomo Fenzi, Oleksandra Lapiha, and Ngoc Khanh Nguyen. SLAP: Succinct
+          lattice-based polynomial commitments from standard assumptions. LNCS, pages 90–119, June 2024.
+          doi:10.1007/978-3-031-58754-2_4.
+[Ajt96]   Miklós Ajtai. Generating hard instances of lattice problems (extended abstract). In 28th ACM STOC,
+          pages 99–108, Philadephia, PA, USA, May 22–24, 1996. ACM Press. doi:10.1145/237814.237838.
+[ALS20]   Thomas Attema, Vadim Lyubashevsky, and Gregor Seiler. Practical product proofs for lattice com-
+          mitments. In Daniele Micciancio and Thomas Ristenpart, editors, CRYPTO 2020, Part II, vol-
+          ume 12171 of LNCS, pages 470–499, Santa Barbara, CA, USA, August 17–21, 2020. doi:10.1007/
+          978-3-030-56880-1_17.
+[APS15]   Martin R Albrecht, Rachel Player, and Sam Scott. On the concrete hardness of learning with errors.
+          Cryptology ePrint Archive, 2015.
+[BC23]    Benedikt Bünz and Binyi Chen. Protostar: Generic efficient accumulation/folding for special-sound
+          protocols. In ASIACRYPT 2023, Part II, LNCS, pages 77–110, December 7–11, 2023. doi:10.1007/
+          978-981-99-8724-5_3.
+[BC25a]   Dan Boneh and Binyi Chen. LatticeFold: A lattice-based folding scheme and its applications to succinct
+          proof systems. In ASIACRYPT 2025, Part III, LNCS, pages 330–362, December 7–11, 2025. doi:
+          10.1007/978-981-95-5099-9_11.
+[BC25b]   Dan Boneh and Binyi Chen. LatticeFold+: Faster, simpler, shorter lattice-based folding for suc-
+          cinct proof systems. LNCS, pages 327–361, Santa Barbara, CA, USA, August 2025. doi:10.1007/
+          978-3-032-01907-3_11.
+[BCFW25] Benedikt Bünz, Alessandro Chiesa, Giacomo Fenzi, and William Wang. Linear-time accumula-
+          tion schemes. In TCC 2025, Part I, LNCS, pages 369–399, November 2025. doi:10.1007/
+          978-3-032-12287-2_13.
+[BCL` 21] Benedikt Bünz, Alessandro Chiesa, William Lin, Pratyush Mishra, and Nicholas Spooner. Proof-
+          carrying data without succinct arguments. In Tal Malkin and Chris Peikert, editors, CRYPTO 2021,
+          Part I, volume 12825 of LNCS, pages 681–710, Virtual Event, August 16–20, 2021. doi:10.1007/
+          978-3-030-84242-0_24.
+[BCMS20] Benedikt Bünz, Alessandro Chiesa, Pratyush Mishra, and Nicholas Spooner. Recursive proof com-
+          position from accumulation schemes. In Rafael Pass and Krzysztof Pietrzak, editors, TCC 2020,
+          Part II, volume 12551 of LNCS, pages 1–18, Durham, NC, USA, November 16–19, 2020. doi:
+          10.1007/978-3-030-64378-2_1.
+[BCPS18] Anurag Bishnoi, Pete L. Clark, Aditya Potukuchi, and John R. Schmitt. On zeros of a polynomial in a
+          finite grid. Combinatorics, Probability and Computing, 27(3):310–333, 2018.
+[BMNW25] Benedikt Bünz, Pratyush Mishra, Wilson Nguyen, and William Wang. Accumulation Without Ho-
+          momorphism. In Raghu Meka, editor, 16th Innovations in Theoretical Computer Science Conference
+          (ITCS 2025), volume 325 of Leibniz International Proceedings in Informatics (LIPIcs), pages 23:1–23:25,
+          Dagstuhl, Germany, 2025. Schloss Dagstuhl – Leibniz-Zentrum für Informatik. URL: https://
+          drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ITCS.2025.23, doi:10.4230/LIPIcs.ITCS.
+          2025.23.
+[BS23]    Ward Beullens and Gregor Seiler. LaBRADOR: Compact proofs for R1CS from module-SIS. LNCS,
+          pages 518–548, Santa Barbara, CA, USA, August 2023. doi:10.1007/978-3-031-38554-4_17.
+[CCKP19] Shuo Chen, Jung Hee Cheon, Dongwoo Kim, and Daejun Park. Verifiable computing for approximate
+          computation. Cryptology ePrint Archive, Paper 2019/762, 2019. URL: https://eprint.iacr.org/
+          2019/762.
+[Che25]   Binyi Chen. Symphony: Scalable SNARKs in the random oracle model from lattice-based high-arity
+          folding. Cryptology ePrint Archive, Report 2025/1905, 2025. URL: https://eprint.iacr.org/2025/
+          1905.
+[CMNW24] Valerio Cini, Giulio Malavolta, Ngoc Khanh Nguyen, and Hoeteck Wee. Polynomial commitments from
+          lattices: Post-quantum security, fast verification and transparent setup. LNCS, pages 207–242, Santa
+          Barbara, CA, USA, August 2024. doi:10.1007/978-3-031-68403-6_7.
+[CT10]    Alessandro Chiesa and Eran Tromer. Proof-carrying data and hearsay arguments from signature cards.
+          In Innovations in Computer Science - ICS 2010, Tsinghua University, Beijing, China, January 5-7,
+          2010. Proceedings, pages 310–331, 2010.
+[EG23]    Liam Eagen and Ariel Gabizon. ProtoGalaxy: Efficient ProtoStar-style folding of multiple instances.
+          Cryptology ePrint Archive, Report 2023/1106, 2023. URL: https://eprint.iacr.org/2023/1106.
+[ESS` 19] Muhammed F. Esgin, Ron Steinfeld, Amin Sakzad, Joseph K. Liu, and Dongxi Liu. Short lattice-based
+          one-out-of-many proofs and applications to ring signatures. In Robert H. Deng, Valérie Gauthier-Umaña,
+          Martín Ochoa, and Moti Yung, editors, ACNS 19, volume 11464 of LNCS, pages 67–88, Bogota, Colombia,
+          June 5–7, 2019. doi:10.1007/978-3-030-21568-2_4.
+[FKNP24] Giacomo Fenzi, Christian Knabenhans, Ngoc Khanh Nguyen, and Duc Tu Pham. Lova: Lattice-based
+          folding scheme from unstructured lattices. In ASIACRYPT 2024, Part IV, LNCS, pages 303–326,
+          December 7–11, 2024. doi:10.1007/978-981-96-0894-2_10.
+[FS87]    Amos Fiat and Adi Shamir. How to prove yourself: Practical solutions to identification and signature
+          problems. In Andrew M. Odlyzko, editor, CRYPTO’86, volume 263 of LNCS, pages 186–194, Santa
+          Barbara, CA, USA, August 1987. doi:10.1007/3-540-47721-7_12.
+[GLLO26] Albert Garreta, Helger Lipmaa, Urmas Luhaäär, and Michał Osadnik. Cyclo: Lightweight lattice-based
+          folding via partial range checks. In Advances in Cryptology – EUROCRYPT 2026, pages 33–62, Cham,
+          2026. Springer Nature Switzerland.
+[GM24]    Albert Garreta and Ignacio Manzur. FLI: Folding lookup instances. LNCS, pages 402–435, Decem-
+          ber 7–11, 2024. doi:10.1007/978-981-96-0935-2_13.
+[KLN` 26] Michael Klooss, Russell W. F. Lai, Ngoc Khanh Nguyen, Michał Osadnik, and Lorenzo Tucci. RoKoko:
+          Lattice-based succinct arguments, a committed refinement. Cryptology ePrint Archive, Paper 2026/575,
+          2026. URL: https://eprint.iacr.org/2026/575.
+[KLNO24] Michael Klooß, Russell W. F. Lai, Ngoc Khanh Nguyen, and Michal Osadnik. RoK, paper, SISsors toolkit
+          for lattice-based succinct arguments - (extended abstract). LNCS, pages 203–235, December 7–11, 2024.
+          doi:10.1007/978-981-96-0935-2_7.
+[KLNO25] Michael Klooß, Russell W. F. Lai, Ngoc Khanh Nguyen, and Michal Osadnik. RoK and roll - verifier-
+          efficient random projection for Õpλq-size lattice arguments - (extended abstract). In ASIACRYPT 2025,
+          Part III, LNCS, pages 297–329, December 7–11, 2025. doi:10.1007/978-981-95-5099-9_10.
+[KLOT25] Shuto Kuriyama, Russell W. F. Lai, Michal Osadnik, and Lorenzo Tucci. SALSAA - sumcheck-aided
+          lattice-based succinct arguments and applications. IACR Cryptol. ePrint Arch., 2025:2124, 2025. URL:
+          https://eprint.iacr.org/2025/2124.
+[KP23]    Abhiram Kothapalli and Bryan Parno. Algebraic reductions of knowledge. In CRYPTO 2023, Part IV,
+          LNCS, pages 669–701, Santa Barbara, CA, USA, August 2023. doi:10.1007/978-3-031-38551-3_21.
+[KS24]    Abhiram Kothapalli and Srinath T. V. Setty. HyperNova: Recursive arguments for customizable
+          constraint systems. LNCS, pages 345–379, Santa Barbara, CA, USA, August 2024. doi:10.1007/
+          978-3-031-68403-6_11.
+[KST22]   Abhiram Kothapalli, Srinath Setty, and Ioanna Tzialla. Nova: Recursive zero-knowledge arguments
+          from folding schemes. In Yevgeniy Dodis and Thomas Shrimpton, editors, CRYPTO 2022, Part IV,
+          volume 13510 of LNCS, pages 359–388, Santa Barbara, CA, USA, August 15–18, 2022. doi:10.1007/
+          978-3-031-15985-5_13.
+[LM06]    Vadim Lyubashevsky and Daniele Micciancio. Generalized compact Knapsacks are collision resistant.
+          In Michele Bugliesi, Bart Preneel, Vladimiro Sassone, and Ingo Wegener, editors, ICALP 2006, Part II,
+          volume 4052 of LNCS, pages 144–155, Venice, Italy, July 10–14, 2006. Springer, Heidelberg, Germany.
+          doi:10.1007/11787006_13.
+[LS15]    Adeline Langlois and Damien Stehlé. Worst-case to average-case reductions for module lattices.
+          75(3):565–599, 2015. doi:10.1007/s10623-014-9938-4.
+[NBS23]   Wilson Nguyen, Dan Boneh, and Srinath Setty. Revisiting the nova proof system on a cycle of curves.
+          Cryptology ePrint Archive, Report 2023/969, 2023. URL: https://eprint.iacr.org/2023/969.
+[NDC` 24] Wilson D. Nguyen, Trisha Datta, Binyi Chen, Nirvan Tyagi, and Dan Boneh. Mangrove: A scalable
+          framework for folding-based SNARKs. LNCS, pages 308–344, Santa Barbara, CA, USA, August 2024.
+          doi:10.1007/978-3-031-68403-6_10.
+[NPR26]   Anca Nitulescu, Nikitas Paslis, and Carla Ràfols. FLIP-and-prove r1CS. IACR Communications in
+          Cryptology, 2(4), 2026. doi:10.62056/ayc3tx4e-.
+
+
+                                                      27
+[NS24]    Ngoc Khanh Nguyen and Gregor Seiler. Greyhound: Fast polynomial commitments from lattices. LNCS,
+          pages 243–275, Santa Barbara, CA, USA, August 2024. doi:10.1007/978-3-031-68403-6_8.
+[NS26]    Wilson Nguyen and Srinath Setty. Neo and superneo: Post-quantum folding with pay-per-bit costs over
+          small fields. page 492–523, Berlin, Heidelberg, 2026. Springer-Verlag. doi:10.1007/978-3-032-35424-2_
+          17.
+[Osa26]   Michał Osadnik. PikkuFold: Efficient folding in a few kilobytes. Cryptology ePrint Archive, Paper
+          2026/1809, 2026. URL: https://eprint.iacr.org/2026/1809.
+[Pau07]   Franz Pauer. Gröbner bases with coefficients in rings. Journal of Symbolic Computation, 42(11-
+          12):1003–1011, 2007.
+[PR06]    Chris Peikert and Alon Rosen. Efficient collision-resistant hashing from worst-case assumptions on cyclic
+          lattices. In Shai Halevi and Tal Rabin, editors, TCC 2006, volume 3876 of LNCS, pages 145–166, New
+          York, NY, USA, March 4–7, 2006. doi:10.1007/11681878_8.
+[STW23]   Srinath Setty, Justin Thaler, and Riad Wahby. Customizable constraint systems for succinct arguments.
+          Cryptology ePrint Archive, Report 2023/552, 2023. URL: https://eprint.iacr.org/2023/552.
+[Val08]   Paul Valiant. Incrementally verifiable computation or proofs of knowledge imply time/space efficiency.
+          In Ran Canetti, editor, TCC 2008, volume 4948 of LNCS, pages 1–18, San Francisco, CA, USA,
+          March 19–21, 2008. doi:10.1007/978-3-540-78524-8_1.
+
+
+
+
+                                                      28
+A     Deferred Preliminaries
+
+A.1    Commitments
+Definition 11. A commitment scheme is a tuple of algorithms pSetup, Com, VerComq that work as
+follows:
+– Setup 1λ Ñ ck takes as input the security parameter in unary and returns the commitment key
+         ` ˘
+
+  ck, and descriptions of the input space D, commitment space C and opening space O.
+– Compck, vq Ñ pc, oq takes the commitment key ck and a value v P D, and outputs a commitment
+  c and an opening o.
+– VerCompck, c, v, oq Ñ b takes as input a commitment c, a value v and an opening o, and accepts
+  pb “ 1q or rejects pb “ 0q.
+
+    A commitment scheme should satisfy the correctness and binding properties, and often they
+also satisfies a hiding property.
+Correctness. For all λ P N and any input v P D we have:
+                   ”           ´ ¯                                              ı
+                Pr ck Ð Setup 1λ , pc, oq Ð Compck, vq : VerCompck, c, v, oq “ 1 “ 1
+
+Binding. For every polynomial-time adversary A, the following probability is negligible in the
+security parameter
+               „                                                                           
+                         v ‰` v 1˘ ^ VerCompck, c, v, oq “ 1                    1   1
+            Pr                                                ; VerCom pck, c, v , o q “ 1
+                 ck Ð Setup 1λ , pc, v, o, v 1 , o1 q Ð Apckq
+
+Hiding. For ck Ð Setup 1λ and @v, v 1 P D, the following two distributions are statistically close:
+                           ` ˘
+
+Compck, vq « Com pck, v 1 q .
+
+A.2    Special Sound Protocols and Committed Transcripts
+We refer to special-soundness and non-interactive arguments as defined by [AFK22].
+
+Definition 12 (Public-coin interactive proof). An interactive proof Π “ pP, Vq for relation
+Ξ is an interactive protocol between two probabilistic machines, a prover P, and a polynomial time
+verifier V. Both P and V take as public input a statement x and, additionally, P takes as private
+input a witness w such that px, wq P Ξ. The verifier V outputs 1 if it accepts and 0 otherwise. Its
+output is denoted by pPpx, wq, Vpxqq. Accordingly, we say the corresponding transcript is accepting
+or rejecting. The protocol is public coin if the verifier randomness is public. The verifier messages
+are referred to as challenges. Π is a p2µ ` 1q-move protocol if there are µ ` 1 prover messages ai
+and µ verifier messages ci . We refer to the transcripts as:
+
+                                    tr “ pa0 , c1 , a1 , . . . , cµ´1 , aµ q
+
+   In this work, we will often refer to transcripts of special-sound protocols as witnesses, and simply
+denote them by w. We do so following the line of work started by Protostar [BC23], which shows a
+family of special-sound protocols to prove different arithmetized relations that are used in common
+SNARKs. Our folding schemes will actually fold these transcripts.
+
+                                                      29
+Definition 13 (Special Soundness). Let Π be a p2µ ` 1q-move public-coin interactive proof
+Π for relation Ξ, where the verifier samples its challenges from a set of size N . We say that
+Π is pα1 , . . . , αµ q-out-of-N special sound if there exists a PPTextractor E such that, given any
+pα1 , . . . , αµ q-tree of accepting transcripts for a statement x, E outputs a witness w such that
+px, wq P Ξ with overwhelming probability.
+
+Random-Oracle Non-Interactive Argument of Knowledge. We say that a p2µ ` 1q-move interactive
+protocol is special-sound, if it is αµ -out-of-N special-sound, for α “ polypλq and N “ λωp1q . The
+results of [AFK22] imply that the non-interactive version of the protocol, after applying Fiat-Shamir
+transformation [FS87], is knowledge-sound with error neglpλq in the random oracle model.
+    For now on, we follow the conventions from Protostar [BC23,EG23] for committed transcripts
+and for committed relations which are consistent with respect to the Fiat-Shamir transformation.
+We introduce below the notions of committed transcripts and hash consistency used in [BC23,EG23].
+
+Definition 14 (Committed Transcripts). For special-sound protocols with a transcript w “
+pa0 , c1 , a1 , . . . , cµ´1 , aµ q, we denote their commited transcript by
+
+                      t “ Compwq “ pCompa0 q, c1 , Compa1 q, . . . , cµ´1 , Compaµ qq
+
+where Com is used as shorthand for the operation of obtaining a committed transcript from a
+standard transcript.
+
+     We remark that if an interactive proof is special-sound, the committed version of the protocol
+(i.e. such that all prover messages are committed) is computationally special sound. The trans-
+formation holds by extending the definition of a valid extractor: for a committed special-sound
+protocol, given a valid tree of transcripts, an extractor should be able to extract either a witness
+of the relation or a collision for the commitment scheme with overwhelming probability, breaking
+commitment binding in the latter case. We refer to [EG23] for details and a formal exposition.
+     Finally, we can transform committed interactive special-sound proofs into non-interactive ones
+via the Fiat-Shamir transform. We say that a transcript is hash-consistent if it has been obtained
+by a correct application of the Fiat-Shamir transform, as follows:
+
+Definition 15 (Hash consistency). Let Hp¨q be a hash function mapping to the challenge space
+and modeled as a random oracle. We say that a µ-round commited transcript t is H-consistent if:
+– Let ti “ pCompa0 q, c1 , Compa1 q, . . . , Compai´1 qq be the partial (committed) transcript of t up to
+  the i-th round.
+– For every i P rµs, it holds that ci “ Hpti q.
+    For simplicity, we simply write Hptq “ 1 if t is H consistent for the random oracle H.
+
+B     Full Description of Protogalaxy
+
+B.1    Protogalaxy Description
+Protogalaxy [EG23] folds a set of k witnesses w1 , . . . , wk that satisfy a base polynomial relation
+defined by
+                          !       ˇ                                            )
+                  Ξ :“ pt, wq ˇ t “ Compwq ^ f pwq “ 0n ^ Hptq “ 1 .                              (4)
+                                  ˇ
+
+
+                                                    30
+for some polynomial map f “ pf1 , . . . , fn q : FM Ñ Fn of degree d defined over a finite field F.
+We recall that whenever we write t “ Compwq, we refer to the committed relations introduced
+in Definition 14 and the hash consistency check Hptq “ 1 is as stated in Definition 15.
+     We present a description of Protogalaxy, which we generalize to work over arbitrary Lagrange
+domains H Ă F that are not necessarily a subgroup.9 We fix positive integers d, k ă n, and denote
+tś:“ log n. We also let L0 pXq, L1 pXq, . . . , Lk pXq be the Lagrange basis over H, and ZpXq :“
+   aPH pX ´ aq be the corresponding vanishing polynomial. We present the protocol in Figure 4 and
+ state it as a reduction of knowledge below. For the proof, we refer to [EG23].
+
+
+            Prover input: Instance-witness pairs ppt0 , β, eq, w0 q and tpti , wi quiPrks
+            Verifier input: Instances pt0 , β, eq and tti uiPrks
+
+            Prover                                                                          Verifier
+                                                                                            Check Hpti q “ 1, for i P rks
+                                                                          δ Ð$ F
+                                                                       ÐÝÝÝÝÝÝÝÝÝÝ
+                                    t´1                                                                                  t´1
+            δ :“ pδ, δ 2 , . . . , δ 2 q                                                    δ :“ pδ, δ 2 , . . . , δ 2         q
+                        řn
+            F pXq :“          powi pβ ` Xδq fi pw0 q
+                       i“1
+                                                                         F1 , . . . , F t
+            Let Fi be the i-th coef. of F pXq                          ÝÝÝÝÝÝÝÝÝÝÑ
+                                                                          α Ð$ F
+                                                                       ÐÝÝÝÝÝÝÝÝÝÝ
+            β :“ β ` α ¨ δ                                                                  β :“ β ` α ¨ δ
+                             t                                                                                 t
+                                   Fi α i                                                                            Fi α i
+                             ř                                                                                 ř
+            F pαq :“ e `                                                                    F pαq :“ e `
+                             i“1              ˜                    ¸                                           i“1
+                         n                        k
+                             powi pβ ˚ q fi
+                         ř                        ř
+            GpXq :“                                     Lj pXqwj
+                       i“1                        j“0
+
+            Compute KpXq such that:
+            GpXq “ F pαqL0 pXq ` ZpXqKpXq
+                                                                          KpXq
+                                                                       ÝÝÝÝÝÝÝÝÝÝÑ
+                                                                          γ Ð$ F
+                                                                       ÐÝÝÝÝÝÝÝÝÝÝ
+            e˚ :“ F pαqL0 pγq ` ZpγqKpγq                                                    e˚ :“ F pαqL0 pγq ` ZpγqKpγq
+                     k                                                                               k
+            w˚ :“                                                                           t˚ :“
+                     ř                                                                               ř
+                          Li pγqwi                                                                         Li pγqti
+                    i“0                                                                              i“0
+
+
+                                    Fig. 4. Protogalaxy folding protocol Ξrand ˆ Ξ k Ñ Ξrand
+
+
+
+
+Theorem 4. The protocol in Figure 4 is a reduction of knowledge for the relations Ξrand ˆ Ξ k Ñ
+Ξrand .
+9
+    The most efficient instantiation, however, is when H is indeed the subgroup of roots of unity of F of order k ` 1
+    for a power-of-two k ` 1, due to the advantage of efficient FFT-based polynomial arithmetic.
+
+
+                                                                       31
+C      A Standalone Range Proof from Neo
+
+In this section, we present the range proof from Neo/SuperNeo [NS26] as a standalone component,
+so that it can be plugged into a folding scheme such as ProtogaLattice independently.10 We also
+carry out a performance comparison, particularly on proof size, with the range proof of Lattice-
+fold [BC25a]. We remark that Cyclo [GLLO26] uses the same range proof as Neo.
+    Neo/SuperNeo embeds a norm check inside a larger batched sumcheck that simultaneously
+handles CCS constraints and accumulated evaluation claims. Strictly speaking, the protocol is
+a reduction: it converts a claim on the bound of the witnesses into an evaluation of multilinear
+extensions.
+
+
+C.1      Notation and Relations
+
+Let q be a prime and ν ě 1 an integer. The witness is a vector w P FM q over the base field, and
+all challenges are drawn from the extension Fq Ě Fq , chosen so that 1{q ν “ neglpλq. In practice,
+                                               ν
+
+ν “ 2 suffices for the Schwartz-Zippel bounds.
+    We assume that M is a power of two, padding witness vectors with zeroes whenever necessary,
+and let ` :“ log2 M denote the number of sumcheck rounds.
+
+Polynomials. For ` ě 1 let eqpx, yq :“ `i“1 xi yi ` p1 ´ xi qp1 ´ yi q . For v P FM
+                                                                                  q we write v
+                                                                                             r for the
+                                       ś `                            ˘
+
+multilinear extension of v, evaluated at points of Fqν through the inclusion Fq Ď Fqν :
+                                                    `
+
+                                                                  ÿ
+                                               vrprq “                     eqpr, xq vx .
+                                                                xPt0,1u`
+
+
+Relations. Fix b, k and M , and let Com be a binding commitment on FM     q . The range check is a
+reduction of knowledge Ξnorm Ñ Ξeval , where the relations are defined as follows
+                             !`                                                                      )
+                                                                 : wi P FM
+                                                            ˘
+                 Ξnorm :“         pti qiPrks ; pwi qiPrks                q , ti “ Compwi q, }w }
+                                                                                              i 8 ă b
+
+to                           !`                                                                       )
+                               pti qi , r 1 P F`qν , pyi1 qi ; pwi qi : ti “ Compwi q, yi1 “ w
+                                                                     ˘
+                  Ξeval :“                                                                   Ăi pr 1 q .
+
+Note that the commitments are not modified throughout the reduction of knowledge.
+
+
+C.2      Protocol
+
+The protocol is simply exploiting the following identity over Fq ,
+
+                                                                             b´1
+                                                                                                             (5)
+                                                                             ź
+                                     }x}8 ă b           ðñ                         px ´ aq “ 0.
+                                                                           a“´b`1
+
+10
+     We have used generative AI tools in this section to import notation and equations from [NS26], as well as to
+     elaborate tables and protocol diagrams.
+
+
+                                                                    32
+   Applied coordinate-wise to w P FM    q and lifted to multilinear extensions, the condition is a
+standard zero-check that we can express as a sumcheck. Moreover, the k instances are batched with
+powers of a single challenge γ P Fqν . This yields:
+
+                                    k                b´1    ´             ¯
+                                                                                                                 (6)
+                                    ÿ                ź
+                   NCpXq :“              γ i´1 ¨                w
+                                                                Ăi pXq ´ a ,          X :“ pX1 , . . . , X` q.
+                                   i“1             a“´b`1
+
+Note that the polynomial has coefficients in Fqν . This is because γ needs to come from the extension
+field for soundness.
+  Protocol ΠNC
+  Input: pti qi ; pwi qiPrks with wi P FM
+        `                       ˘
+                                            q
+
+  Output: pti qi , r 1 , pyi1 qi ; pwi qi
+          `                               ˘
+
+
+  1. V: sample and send α Ð$ F`qν and γ Ð$ Fqν .
+  2. P Ø V: define QpXq :“ eqpX, αq ¨ NCpXq P Fqν rXs for NC as in Equation (6). Run SumCheckp0; Qq over
+     t0, 1u` , reducing 0 “ xPt0,1u` Qpxq to an evaluation claim v “ Qpr 1 q at r 1 Ð$ F`qν .
+                                 ř                                        ?
+
+
+  3. P: send yi1 Ð w Ăi pr 1 q P Fqν for all i P rks.
+  4. V: derive θ :“ ki“1 γ i´1 b´1       a“´b`1 yi ´ a and accept if and only if v “ eqpr , αq ¨ θ.
+                      ř               ś        ` 1    ˘                            ?     1
+
+  5. Output pti qi , r 1 , pyi1 qi ; pwi qi .
+                `                          ˘
+
+
+The verifier’s work in step 4 is kp2b ´ 1q multiplications in Fqν together with the Op`q cost of
+evaluating eqpr 1 , αq and of the sumcheck verifier. For the completeness and soundness analysis, we
+defer the reader to [NS26].
+
+C.3    Proof size for ternary vectors (b “ 2)
+
+Next, we analyze the proof size of the protocol. Setting b “ 2 means }wi }8 ă 2, that is, every
+coordinate lies in t´1, 0, 1u. This is the setting chosen by Neo, Latticefold and Cyclo. The sumcheck
+contributes ` rounds, in which a univariate polynomial of degree 4 is sent at each round. This can
+be done with four field elements sent per round (as one of them can be derived as a check). Step 3
+contributes k elements. Since the challenges are not counted, we have that
+
+                                   |πNC | “ 4` ` k ¨ νrlog2 qs bits.                              (7)
+                                              `      ˘
+
+
+    In Table 6, we give the resulting transcript sizes for parameters ν “ 2 and a 64-bit prime q. At
+the current parameter setting, the soundness analysis gives around 121 bits of security. To see this,
+observe that we are drawing challenges from a 128 bit-size extension field. The remaining 7 bits are
+lost due to the sumcheck itself.
+
+Comparison with LatticeFold’s range proof. LatticeFold [BC25a] checks norms with the polynomial
+                                                2k
+                                                 ÿ dec                       b´1
+                                                                             ź     ´              ¯
+                             gnorm pxq :“                µi ¨ eqpβ, xq ¨               fˆi pxq ´ j ,
+                                                                                        r
+                                                   i“1                     j“´pb´1q
+
+which is essentially identical to NC of Equation (6). The difference with Neo is that LatticeFold
+runs the sumcheck over the cyclotomic ring Rq , with challenges from a strong sampling set C Ď Rq ,
+
+                                                                  33
+                                     M      `      k“1      k“2       k“3       k“4
+                                    216    16      1.02    1.03     1.05      1.06
+                                    220    20      1.27    1.28     1.30      1.31
+                                    224    24      1.52    1.53     1.55      1.56
+                                    228    28      1.77    1.78     1.80      1.81
+                                    230    30      1.89    1.91     1.92      1.94
+             Table 6. Transcript size of the range check ΠNC in KB, at b “ 2, ν “ 2 and a 64-bit prime q.
+
+
+
+
+so each round message is a tuple of Rq -elements. Neo runs the sumcheck over the field Fqν , resulting
+into much smaller communication.11 To give a precise estimate, at ` “ 26 rounds, we have that
+LatticeFold’s range check is 52 KB, whereas Neo’s range check is 1.6 KB.
+
+Adapting the range proof to ProtogaLattice. A ProtogaLattice witness is a ring vector, which we
+write wR P Rm   q to distinguish it from the field vector w of this appendix. Since }wR }8 is by
+definition the `8 norm of its coeficient vector, ΠNC applies seamlessly with w :“ cfpwR q P FN          q .
+                                                                                                          m
+
+Observe that its output fits our Definition 7 almost directly: the evaluation point and the claimed
+values become the public input xRP :“ pr 1 , pyi1 qi q, while the k claims yi1 “ w
+                                                                                 Ăi pr 1 q are linear in the
+witness, so fRP has degree one. The remaining step is to express the (extension) field evaluation
+r 1 q as an Rq -constraint, to be able to fold it using ProtogaLattice. There are two ways to do
+wpr
+this. One is to use the Neo embedding (see [NS26, Theorems. 9–10]), which is exactly the additional
+reduction of knowledge that we mentioned in Section 4, to translate field to ring constraints. If the
+range proof of Neo is used, that reduction of knowledge comes at minimal extra cost as the sumcheck
+can be batched with that of the range proof. The second way is to embed the extension field as a
+CRT slot of Rq , which enables us to translate the sumcheck claim to the ring straightforwardly.
+    The range proof from LatticeFold can be also used straightforwardly by ProtogaLattice, but at
+a significantly higher overall cost.
+
+
+D      Deferred Proofs
+
+D.1      Gröbner Bases over Rings
+
+We consider the theory of Gröbner bases over a commutative noetherian ring R from [Pau07]. Let
+M be the polynomial ring RrX1 , . . . , Xk s, viewed as a free R-module with the basis of mono-
+mials pX α qαPNk . We implicitly consider a total order ď ř over the monomials of M . Through-
+out this document, for any non-zero polynomial P “ αPNk cα X α P M , we define its degree
+degpP q “ maxtα{cα ‰ 0, and lcpP q “ cdegpP q (respectively lmpP q “ lcpP qX degpf q ) denotes the
+leading coefficient (respectively the leading monomial) of P . Finally, for a finite subset F Ă M
+(respectively F Ă R) we let xF yM (respectively xF yR ) denote the ideal of M generated by the
+polynomials in F (respectively the ideal of R generated by F ). We omit the subscript and write
+xF y when it is clear from context.
+11
+     Actually, a sumcheck over Rq can seen as N {τ parallel sumchecks over Fqτ [BC25a, Sec. 5], so one ring transcript
+     proves N {τ “ 16 field claims at once. This closes the gap between the two techniques significantly, but Neo’s proof
+     is still more efficient.
+
+
+                                                            34
+Proposition 2 (Existence of division in M , [Pau07], Proposition 2). Let F be a finite subset
+of M zt0u and P P M . For all P P M , there exists a remainder R P M and a tuple of quotients
+pQf qf PF P M F such that:
+– P “ f PF Qf f ` R
+        ř
+
+– For all f P F , Qf “ 0 or degpQf q ` degpf q ď degpP q
+– R “ 0 or lcpRq R xlcpf q{f P F such that degpRq P degpf q ` Nk yR .
+   For an ideal I Ă M and α P Nk , we define the leading coefficient ideal lcpα, Iq “ xlcpf q{f P
+I such that degpf q “ αy.
+Definition 16 (Gröbner basis, [Pau07], Definition 4). A finite subset G Ă Izt0u is a Gröbner
+basis of I if and only if for all α P Nk , the ideal lcpα, Iq is generated by tlcpGq{G P G, α P
+degpGq ` Nk u.
+Proposition 3 ([Pau07], Proposition 7). Let G be a Gröbner basis of I. Then P P I if and
+only if a remainder of P after division by G is 0.
+   The following proposition provides a generalization of Buchberger’s criterion, which also induces
+an algorithm for computing Gröbner bases over rings.
+Proposition 4 (Gröbner basis criterion, [Pau07] Proposition 9). Let G be a finite subset
+of M zt0u, and let I :“ xGyM . For any non-empty subset E Ă G, let SE be a finite set of generators
+of the R-module                     #          ˇ               +
+                                               ˇÿ
+                                                  ce lcpeq “ 0
+                                               ˇ
+                                      pce qePE ˇ
+                                               ˇ
+                                                 ePE
+of syzygies of plcpeqq. Then, the following assertions are equivalent:
+1. G is a Gröbner basis for I
+2. For all E Ă G and for all pce qePE P SE a remainder of
+                                           ÿ
+                                              ce X m´degpeq e,
+                                           ePE
+
+   where m “ pmaxePE pdegpeqi qqiPrks after division by G is 0.
+Reduced Gröbner bases. To ensure the uniqueness of the remainder, we rely on the notion
+of reduced Gröbner bases. We assume the existence of a map Gen that takes an ideal J Ă R
+and returns a system of canonical generators GenpJ q of J . Additionally, we fix a set of canonical
+representatives for the coefficients: For any ideal J Ă R and any coset z ` J Ă R, the function R
+selects a unique element Rpz, J q. We require Rp0, J q “ 0.
+Definition 17 (Reduced Gröbner bases, [Pau07], Definition 17). Let I be an ideal of M .
+A Gröbner basis G of I is a reduced Gröbner basis if and only iff:
+– For all α P degpIq the map G ÞÑ lcpGq from tG P G{ degpGq “ α to tRpz, lcpă α, Iqq{z P
+  Genplcpα, Iuzt0uy is bijective
+– For all G :“ βPNk cβ X β P G and for all α P Nk with cα ‰ 0 and α ‰ degpGq, we have
+                  ř
+  cα “ Rpcα , lcpα, Iqq.
+Proposition 5 (Uniqueness, extension of [Pau07] Proposition 19). Every ideal I in M
+has a unique reduced Gröbner basis. In particular, up to the choice of the maps Gen and R, the
+remainder in the division by the reduced Gröbner basis of I is unique.
+
+                                                  35
+D.2    Proof of Theorem 1
+Proof. We split the proof in 4 claims.
+CLAIM 1: The subset of invertible-or-zero points in the variety of I (i.e the set of common zeros
+of all polynomials of I) is the set of k ` 1 points tPj , j P r0, ksu, where Pj ’s last j coefficients are
+ones and the others are zeroes.
+    Let us find the zeros of I with invertible-or-zero coefficients, first considering all k equations
+Zjj “ Yj p1 ´ Yj q “ 0, with j P r0, k ´ 1s. Since we assume that all Yj ’s and 1 ´ Yj ’s are invertible
+or zero, we have that @j P r0, k ´ 1s, Yj P t0, 1u.
+Initialization: If k “ 1, the invertible-or-zero points in the variety are the two points Y0 “ 0 and
+Y0 “ 1.
+Induction: Assume that the variety of I is indeed the set of k ` 1 points tPj , j P r0, ksu, where Pj ’s
+last j coefficients are ones and the others are zeros. We consider the next case for k ` 1 variables.
+Let I 1 :“ xpZj`1,j qjPr0,ks y ` xpZjj qjPr0,ks y. Again, we have Yj P t0, 1u for all j P r0, ks. If Yk “ 0, it
+follows from Yk´1 p1 ´ Yk q “ 0 that Yk´1 “ 0, thus by the induction hypothesis, the only one point
+for which Yk “ 0 is p0, . . . , 0q. If Yk “ 1, then we have no additional constraint on Yk´1 , thus the
+concatenation of any point Pj of I and 1 is a point of I 1 . In the end, the invertible or zero points
+in the variety of I 1 is the set of k ` 2 points of the next induction step:
+                                I 1 “ tp0, . . . , 0q and @j P r0, ks, pPj ||1qu.
+
+CLAIM 2: The polynomial wk˚ pYq interpolates the wj ’s over the invertible or zero points of the
+variety of I, i.e wk˚ pPj q “ wj .
+    Recall that via Lemma 4,
+                                                        k
+                                                        ÿ
+                                   wk˚ pYq “ Y0 w0 `        pYj ´ Yj´1 qwj .
+                                                        j“1
+
+Define polynomials cj such that wk˚ “ j“1 cj wj , i.e c0 “ Y0 , ck “ 1 ´ Yk´1 and for all j P
+                                              řk
+r0, k ´ 1scj “ Yj ´ Yj´1 . Since Y0 is zero across all the Pj ’s, except for the last Pk “ p1, . . . , 1q, we
+have c0 pPj q “ 0 for all j P r0, k ´ 1s and c0 pPk q “ 1. Conversely, ck pPj q “ 1 for all j P rks and
+ck pP0 q “ 0. For all other coefficients cj for j P rk ´ 1s, we have that cj pY0 , . . . , Yk´1 q “ Yj ´ Yj´1 .
+Consecutive coordinates of Pj are equal, except when ` “ j, thus cj pP` q “ 0 for all ` except ` “ j
+where cj pPj q “ 1. It follows that @i, j P r0, ksci pPj q “ 0 if i ‰ j and cj pPj q “ 1.
+CLAIM 3: We consider the quotient M “ Rq rY0 , . . . , Yk´1 s, and prove that the map φ : M ÝÑ
+Rk`1
+ q   defined by
+                                 φpP q ÞÑ pP pPj qqjPr0,ks
+is an isomorphism of Rq -modules.
+    We consider the basis B “ pY0 , . . . , Yk´1 , 1q of M{pIq. To justify that B is indeed a ba-
+sis of M{pIq, consider any monomial    ś U “ Y0 ¨ ¨ ¨ Yk´1 , and notice that via the polynomials
+                                                      a0      ak´1
+
+Z00 , . . . , Zk´1,k´1 P I, we have U “ i st ai ‰0 Yi . Next, because Zj`1,j “ 0, we have Yj`1 “ Yj Yj`1 ,
+thus by induction we obtain U “ Yimax with imax “ maxti, ai ‰ 0u or U “ 1 if ti, ai ‰ 0u is empty.
+It follows that B is, indeed, a basis for M{I, thus the dimension of M{I is k ` 1.
+    We now calculate the matrix of φ in basis B to basis B. We have bi pPj q “ 0 for all i ă j
+and 1 otherwise. It follows that the matrix of φ is anti-triangular, with ones on the diagonal, thus
+invertible, hence φ is an isomorphism.
+
+                                                       36
+CLAIM 4: Putting the pieces together, we show that
+                  ˜                                   ¸ ˜                                          ¸
+                                k
+                                ÿ                                          k
+                                                                           ÿ
+              f       Y0 w0 `       pYj ´ Yj´1 qwj ´ Y0 f pw0 q `              pYj ´ Yj´1 qf pwj q     P I.
+                                j“1                                       j“1
+
+
+We recall that from claim 2, we have that the polynomial
+                          ˜                                     ¸ ˜                                           ¸
+                                          k
+                                          ÿ                                         k
+                                                                                    ÿ
+           H̃pYq :“ f       Y0 w0 `           pYj ´ Yj´1 qwj ´ Y0 f pw0 q `             pYj ´ Yj´1 qf pwj q
+                                         j“1                                        j“1
+
+
+vanishes on the Pj ’s, thus φpH̃q “ 0. Since from claim 3, φ is an isomorphism, we have H̃ mod I “ 0
+i.e H̃ P I and the result follows.                                                                [
+                                                                                                  \
+
+
+D.3   Proof of Proposition 1
+
+Proof. To prove that G is a Gröbner basis for I, we use the extension of Buchberger’s criterion to
+rings Proposition 4. Since all leading coefficients lcpGq are 1 (and thus units of Rq ), for any subset
+E Ă G, the syzygy module of the leading coefficients of E is:
+                                                         ÿ
+                                                               ce “ 0.
+                                                         ePE
+
+This module is generated by vectors with one 1, one ´1 and zeros elsewhere. Hence the generalized
+criterion from Proposition 4 reduces to the usual Buchberger S-polynomial criterion, i.e for all
+Gi , Gj P G, with gi “ lmpgi q and gj “ lmpgj q, a remainder of
+
+                                                      lcmpgi , gj q      lcmpgi , gj q
+                                      SpGi , Gj q “                 Gi ´               Gj
+                                                          gi                 gj
+
+is 0.
+    We now proceed to show that for all S-polynomials of pairs of elements of G have remainder 0
+in the division by G. Consider two polynomials Zij , Zrs , with i, j, r, t P r0, ks, i ě j and r ě t.
+    The first case is when ti, juXtr, su “ H. In this case, Zij and Zrs are coprime, thus SpZij , Zrs q P
+xGy.
+    When i “ r, we have
+
+                                                      Yi Yj Ys       Yi Yj Ys
+                                    SpZij , Zis q “            Zij ´          Zis
+                                                       Yi Yj          Yi Ys
+                                                 “ Ys pYi Yj ´ Yi q ´ Yj pYi Ys ´ Yi q
+                                                 “ Yi Yj ´ Yi Ys
+                                                 “ pYi Yj ´ Yi q ´ pYi Ys ´ Yi q
+                                                 “ Zij ´ Zis ,
+
+thus the remainder is 0.
+
+                                                               37
+   When i “ s, we have
+
+                                                Yi Yj Yr       Yi Yj Yr
+                              SpZij , Zri q “            Zij ´          Zri
+                                                 Yi Yj          Yi Yr
+                                          “ Yr pYi Yj ´ Yi q ´ Yj pYr Yi ´ Yr q
+                                          “ Yr Yi ´ Yr Yj
+                                          “ pYr Yi ´ Yr q ´ pYr Yj ´ Yr q
+                                          “ Zri ´ Zrj ,
+
+therefore the remainder is 0. Notice that since i ě j and r ě i, we have r ě j thus Zrj P G.
+   When j “ s, we have
+
+                                                Yi Yj Yr       Yi Yj Yr
+                             SpZij , Zrj q “             Zij ´          Zrj
+                                                 Yi Yj          Yr Yj
+                                           “ Yr pYi Yj ´ Yi q ´ Yi pYr Yj ´ Yr q
+                                           “ 0.
+
+    We now prove that G is a reduced Gröbner basis. Since all the leading coefficients of the Zij ’s
+are 1, we trivially chose Gen to map to t1u. Furthermore, since all the leading coefficients are 1,
+we only need to define Rpz, x0yRq q, thus R “ 0. With both Gen and R being trivial, the conditions
+for G to be a reduced Gröbner basis for I w.r.t Definition 17 become the usual conditions for a
+Gröbner basis to be reduced over fields, that is,
+
+1. For all G P G, lcpGq “ 1
+2. For all G P G, no monomial of G is in xlmpG1 q|G1 P GztGuqy
+
+We do have that the leading coefficient of Zij is 1 for all i ě j, so we now prove 2). Consider
+Zij “ Yi Yj ´Yi P G. The leading monomials of G are of degree 2, therefore Yi R xlmpG1 q|G1 P GztGuqy.
+Moreover, the only monomial of degree 2 that divides Yi Yj is itself. Since Zji is not in G, we have
+that Yi Yj is also not in xlmpG1 q|G1 P GztGuqy, therefore 2) is satisfied, which completes the proof.
+                                                                                                     [
+                                                                                                     \
+
+
+D.4   Correctness and Soundness of PGL-Fold: Proof of Theorem 2
+
+Proof.    Correctness:˘ Consider     an honestly generated transcript of Figure 2. More` precisely,   let
+  pt0 , x0 , β, eq, w0 P Ξf,n,γ,1 be an input accumulator instance-witness pair and let ptj , xj q, wj jPrks P
+`        RP               acc                                                                  RP
+                                                                                                      ˘
+   fold
+pΞf,n,B,1 qk be k input instance-witness pairs.
+    We prove that the output pt˚ , xRP,˚ , β ˚ , e˚ q, w˚ is in the relation Ξf,n,γ 1 ,1 , with γ “ γ `
+                                  `                       ˘                   acc                1
+
+p2T k ` 1qB.
+    By  definition of   ˚ , t˚ and the linearity of Ajtai commitments, we have that t˚ “
+                                                                                                ř
+                      w                                                                           j cj tj “
+  j cj Awj “ Ap j cj wj q. We check the norm bound on w to ensure that t is indeed an Ajtai
+ř                 ř                                            ˚                 ˚
+
+commitment to w˚ :
+
+                                                       38
+                                      ›ÿk          ›
+                              }w˚ } “ ›   Lj pyqwj ›
+                                      ›            ›
+                                             j“0
+                                         ›                  k
+                                                            ÿ                ›
+                                       “ ›w0 ` py1 ´ 1qw1 `   pyj ´ yj´1 qwj ›
+                                         ›                                   ›
+                                                                         j“2
+
+                                       ď γ ` pT ` 1qB ` 2T pk ´ 1qB
+                                       ď γ ` p2T k ` 1qB “ γ 1 .
+                                                              n
+   To finish the proof, we need to prove that
+                                                              ř
+                                                                    powi pβ ˚ qfi pw˚ q “ e˚ .
+                                                              i“1
+   Let i P rns. Via Lemma 4, we can substitute w˚ with its closed form:
+                             ¨       ˛          ¨                  ˛
+                               źk            ÿk             źk
+                       w˚ “ ˝     Xj ‚w0 `      ˝p1 ´ Xj q      X` ‚ wj
+                                        j“1                   j“1                `“j`1
+
+
+in the expression of fi pw˚ q. We have:
+
+                                  »¨           ˛                 ¨                       ˛       fi
+                                       k                     k                   k
+                                                                                                              (8)
+                                       ź                     ÿ                   ź
+               fi pw˚ q “ fi –˝              Xj ‚w0 `            ˝p1 ´ Xj q            X` ‚wj fl
+                                       j“1                   j“1               `“j`1
+                              ˜                                                 ¸
+                                                   k
+                                                                                                              (9)
+                                                   ÿ
+                          “       Y0 fi pw0 q `          pYj ´ Yj´1 qfi pwj q        mod I
+                                                   j“1
+                                              k
+                                                                                                             (10)
+                                              ÿ                                     ÿ
+                          “ Y0 fi pw0 q `           pYj ´ Yj´1 qfi pwj q `                 Qpiq
+                                                                                            rs pYqZrs pYq,
+                                              j“1                                1ďrďsďk
+
+                                                                                                             (11)
+                                              ÿ
+                          “ fi pw0 q `                   Qpiq
+                                                          rs pyqZrs pyq
+                                          1ďrďsďk
+
+where Equation (8) follows from Lemma 4, Equation (9) from Theorem 1, and Equation (10)
+follows from the existence of the quotient in Proposition 1 (they are unique up to syzygies). Finally,
+Equation (11) follows from the fact that each wj with j P rks is a witness of Ξf,n,B,1
+                                                                                fold   , so fi pwj q “ 0
+for every i P rns.
+    Since the Qřrs and the Krs are equal up to syzygies, any other choice of a quotient gives the
+same value of rďs Krs Zrs . Multiplying Equation (11) by powi pβ ˚ q and summing over i,
+                 n
+                 ÿ                                 n
+                                                   ÿ                                ÿ
+                       powi pβ ˚ qfi pw˚ q “             powi pβ ˚ qfi pw0 q `             Krs pyqZrs pyq
+                 i“1                               i“1                           1ďrďsďk
+                                                                   ÿ
+                                              “ F pαq `                  Krs pyqZrs pyq “ e˚ .
+                                                              1ďrďsďk
+
+
+Soundness.
+
+                                                                39
+    We define an extractor E that given rewindable black-box access to a prover A returns either
+a collision for the commitment scheme or tuples ptj , wj qjPrks P pΞf,n,B
+                                                                    fold
+                                                                          ext ,%
+                                                                                 qk and ppt0 , β, eq, w0 q P
+Ξf,n,Bext ,% .
+  acc
+
+Extraction : The transcripts provided by the prover are of the form
+                         pptj qjPr0,ks , β, e, δ, pFi qiPrts , α, pKrs qr,s , y, t˚ , β ˚ , e˚ , w˚ q.
+Our extractor E does the following:
+1. Run A and obtain a first transcript
+                           pptj qjPr0,ks , β, e, δ, pFi qiPrts , α, pKrs qr,s , y, t˚ , β ˚ , e˚ , w˚ q.
+2. For all j P rks: Rewind the prover and send a new challenge yj1 “ p1, y1 , . . . , yj1 , . . . , yk q, where yj1
+   is sampled independently from the same distribution C as yj . Let wj˚ be the j-th accumulator
+   and t˚j be the accumulator’s commitment.
+3. For all j P rks, construct relaxed openings p∆j , zj q to the commitment ptj ´tj`1 q, with tk`1 :“ 0,
+   where zj :“ yj ´ yj1 and ∆j :“ zj´1 pw˚ ´ wj˚ q.
+4. Define w s k :“ ∆k and sk :“ zk .
+5. Define recursively for all j “ k ´ 1 down to 1: w          s j`1 ` ∆j and sj :“ ki“j zi .
+                                                                                         ś
+                                                      s j :“ w
+6. Compute the accumulator opening: w     s 0 :“ w˚ ´ kj“1 Lj pyqw   s j with slack s0 :“ s1 .
+                                                         ř
+
+7. The extractor outputs either the collision, or the witnesses pw   s j , sj qjPr0,ks .
+
+   We prove step by step that the extracted pw
+                                             s j qjPr0,ks are in the relation pΞf,n,B
+                                                                                fold
+                                                                                      ext ,%
+                                                                                             qk ˆ Ξf,n,B
+                                                                                                   acc
+                                                                                                         ext ,%
+                                                                                                                ,
+where Bext :“ p2T q pk ` k ` 1qγ and % “ p2T q .
+                   k  2         1               k
+
+For j P rks, p∆j , zj q are relaxed openings for the commitments tj ´ tj`1 .
+We show that p∆j , zj qjPrks defined in step 3) are relaxed openings to the commitments ptj ´ tj`1 q.
+More precisely, they satisfy (i) A∆j “ tj ´ tj`1 , (ii) }zj ∆j } ď 2γ 1 and (iii) }zj }op ď 2T .
+   The output accumulators pwj˚ qjPrks of all transcripts satisfy Awj˚ “ t˚j . By construction of t˚ ,
+we have
+                                           k
+                                           ÿ
+                                     ˚
+                                   t “           Lj pyqtj
+                                           j“0
+                                                  k
+                                                  ÿ
+                                         “ t0 `       pyj ´ yj´1 qtj
+                                                  j“1
+                                                  k
+                                                  ÿ                k´1
+                                                                   ÿ
+                                         “ t0 `         yj t j ´         yj tj`1
+                                                  j“1              j“0
+                                                                    k´1
+                                                                    ÿ
+                                         “ t0 ´ t1 ` yk tk `              yj ptj ´ tj`1 q,
+                                                                    j“1
+
+therefore for all j P rks we have t˚ ´ t˚j “ pyj ´ yj1 qptj ´ tj`1 q “ zj ptj ´ tj`1 q. It follows that
+A∆j “ Apw˚ ´ wj˚ q “ ptj ´ tj`1 q. To complete this proof, we bound the norm of zj ∆j , which is
+exactly w˚ ´ wj˚ , by the output accumulator bound γ 1 as follows
+                                            }zj ∆j } “ }w˚ ´ wj˚ } ď 2γ 1 .
+
+
+                                                              40
+For j P rks, pw
+              s j , sj q are relaxed openings. We show that the extracted pw    s j , sj qjPr0,ks are relaxed
+openings w.r.t the commitments ptj qjPrks , i.e (i) Aw
+                                                     s j “ tj (ii) }sj w
+                                                                       s j } ď Bext (iii) }sj }op ď %.
+   For j “ k, the results hold because }sk }op “ }yk ´ yk1 }op ď 2T ď %,
+
+                                                Aw
+                                                 s k “ A∆k
+                                                         “ tk ,
+
+and
+
+                                             }sk w
+                                                 s k } “ }sk ∆k }
+                                                         ď 2γ 1
+                                                         ă Bext .
+
+For j P r1, k ´ 1s, work by induction from k down to j. For }sj }, we have
+
+                                         }sj }op “ }zj ¨ ¨ ¨ zk }op
+                                                 ď }zj }op ¨ ¨ ¨ }zk }op
+                                                 ď p2T qk´j`1
+                                                 ď %.
+
+For commitments, we have
+
+
+                                         Aw
+                                          s j “ Apw
+                                                  s j`1 ` ∆j q
+                                                “ tj`1 ` tj ´ tj`1
+                                                “ tj .
+
+For the slack factor, we have as above
+
+                                                          k
+                                                          ź
+                                            }sj }op “ }         zi }op
+                                                          i“j
+
+                                                    ď p2T qk´j`1
+                                                    ď %.
+
+   For the norm bound, we have
+
+                               }sj w
+                                   s j } “ }zj sj`1 w
+                                                    s j`1 ` zj sj`1 ∆j }
+                                                  s j`1 } ` p2T qk´j }zj ∆j },
+                                       ď 2T }sj`1 w
+
+using sj “ zj sj`1 and }sj`1 }op ď p2T qk´j . Thus,
+
+                                        s j } ď pk ´ j ` 1qp2T qk´j p2γ 1 q
+                                    }sj w
+                                            ă Bext .
+
+
+                                                         41
+The extracted accumulator w   s 0 is a relaxed opening to t0 . We now prove that ws 0 satisfies (i), (ii)
+and (iii). For the slack factor, we have s0 “ s1 , thus }s0 }op ď %. For the commitment, we have
+                                                                      k
+                                                                      ÿ
+                                          s 0 “ Apw˚ ´
+                                         Aw                                  Lj pyqw
+                                                                                   s jq
+                                                                      j“1
+                                                               k
+                                                               ÿ
+                                                    “ t˚ ´            Lj pyqs
+                                                                            tj
+                                                               j“1
+
+                                                    “ t0 .
+For the norm bound, we have
+                                                             k
+                                                             ÿ
+                              s 0 } “ }s0 w˚ ´ s0
+                          }s0 w                                    Lj pyqw
+                                                                         s j q}
+                                                             j“1
+                                                        k
+                                                ˚
+                                                        ÿ s0
+                                     “ }s0 w ´                     ¨ Lj pyq ¨ sj w
+                                                                                 s j q}
+                                                        j“1
+                                                              sj
+                                                         k
+                                                         ÿ
+                                     ď p2T qk γ 1 `            p2T qj´1 ¨ p2T q ¨ }sj w
+                                                                                      s j}
+                                                         j“1
+                                                         k
+                                                         ÿ
+                                     ď p2T qk γ 1 `            p2T qj p2T qk´j 2pk ´ j ` 1qγ 1
+                                                         j“1
+                                               k 1
+                                     ď p2T q γ p1 ` kpk ` 1qq
+                                     ď p2T qk γ 1 pk 2 ` k ` 1q “ Bext .
+Under the hardness of MSIS8,q
+                          κ,m,2%Bext , the pw
+                                            s j qjPr0,ks are unique.
+The extracted witnesses satisfy the constraints. In the final part of the proof, we show that with
+                            n                                                              n
+                                                                 and
+                            ÿ                                                              ÿ
+                Φ˚ pXq “          powi pβ ˚ qfi pXq                           ΦpXq “             powi pβqfi pXq,
+                            i“1                                                            i“1
+
+the following holds
+                        ωj qjPrks
+                       pĎ            satisfies Φ˚ pĎ
+                                                   ωj q “ 0                  and Φ˚ pĎ
+                                                                                     ω0 q “ F pαq.
+On
+ř the one hand, for any challenge vector submitted by the extractor, substituting w with
+                                                                                   ˚
+
+               ωj yields:
+ jPr0,ks Lj pyqĎ
+
+                                          ´ ÿ                         ¯
+                      Φ˚ pω ˚ pyqq “ Φ˚                 Lj pyqĎ
+                                                              ωj
+                                              jPr0,ks
+                                        k
+                                        ÿ                              ÿ
+                                    “         Lj pyqΦ˚ pĎ
+                                                        ωj q `               Qrs pyqZrs pyq
+                                        j“0                            r,s
+                                                        k
+                                                        ÿ                           ÿ
+                                    “ Φ˚ pĎ
+                                          ω0 q `              Lj pyqΦ˚ pĎ
+                                                                        ωj q `             Qrs pyqZrs pyq.
+                                                        j“1                          r,s
+
+
+
+                                                                 42
+On the other hand, via the verification equation, we have:
+
+                              Φ˚ pw˚ pyqq “ e˚
+                                            ÿ
+                                          “    Krs pyqZrs pyq ` F pαq.
+                                                    r,s
+
+Plugging both together, we have that the following polynomial:
+                                           k
+                                           ÿ                          ÿ
+                      ˚
+           Ψ pYq :“ pΦ pĎ
+                        ω0 q ´ F pαqq `          Lj pYqΦ˚ pĎ
+                                                           ωj q `           pQrs pYq ´ Krs pYqq Zrs pYq
+                                           j“1                        r,s
+
+vanishes at all accepting transcripts. Under the Schwartz-Zippel Lemma over rings Lemma 1, the
+probability that Ψ is non-zero and vanishes for Y Ð C k is bounded by
+                                                               degpΨ q   dk
+                                PYÐC k pΨ pYq “ 0q ď                   ď     .
+                                                                 |C|     |C|
+
+   It follows that with probability at least 1 ´ |C|
+                                                 dk
+                                                     , we have Ψ “ 0 as a polynomial. Under the
+uniqueness of the decomposition in the reduced Gröbner basis Propositions 1 and 5, it follows that
+
+
+                                     @j P rks,      Φ˚ pĎ
+                                                        ωj q “ 0                                          (12)
+                                                      ˚
+                                                    Φ pĎ
+                                                       ω0 q “ F pαq                                       (13)
+                                             ÿ                ÿ
+                                                    Krs Zrs “    Qrs Zrs .
+                                              r,s               r,s
+
+   Both Equations (12) and (13) are polynomials in α, δ of total degree 2 log n that vanish on the
+random points pα, βq drawn from C 2 , where we recall C is a strong sampling set. It follows that with
+probability at least 2 log
+                       |C| , these polynomials are 0, thus by identifying each coefficient, we have:
+                           n
+
+
+                                                      ωj q “ 0 and
+                                         @j P rks, f pĎ
+                                          ÿn
+                                              powi pβqfi pĎω0 q “ e,
+                                           i“1
+
+which completes the proof.
+
+D.5   Correctness and Soundness of PGL-Boot: Proof of Theorem 3
+                                                  acc
+Proof. Correctness. Let pt, xRP , β, eq, w P Ξf,n,γ   1 ,1 . Since b
+                                                                    k1 ě γ 1 , the w ’s are the base b
+                          `                 ˘
+                                                                                    j
+decomposition of w, i.e j“0 b wj “ w and }wi }8 ď b ´ 1. By the linearity of the commitment
+                        řk1 ´1 j
+
+scheme, the first check kj“0  b tj passes. The second check is a direct consequence of Theorem 1
+                       ř 1 ´1 j
+
+evaluated at Y “ D. since Lj pDq “ bj we have j Lj pDqωj “ ω, hence HpDq “ e.
+                                               ř
+   The final witness w˚ is obtained by the same linear combination as in PGL-Fold (Figure 2),
+with norm bounded by
+                               1 ´1
+                              kÿ
+              ˚
+                                                                      `                   ˘
+           }w } ď pb ´ 1q `           }yj ´ yj´1 }op pb ´ 1q ď            2T pk 1 ´ 1q ` 1 pb ´ 1q ď γ.
+                               j“1
+
+
+                                                          43
+   Soundness. Our extractor runs the extractor from the knowledge soundness of Theorem 2. We
+obtain relaxed witnesses pw                                         qk . Instantiating the bounds of Theorem 2
+                                                       acc            1
+                             s j , sj qjPr0,k1 ´1s P pΞf,n,B ext ,%
+with k :“ k 1 ´ 1 free challenges and output accumulator bounded by γ gives
+
+                                                                       and
+                                      1                                                  1
+                      Bext “ p2T qk ´1 pk 1 ´ 1q2 ` k 1 γ                      % “ p2T qk ´1 .
+                                          `                ˘
+
+
+Finally, under the hardness of MSIS8,q
+                                   κ,m,2%Bext , our extractor outputs unique pw
+                                                                                                                 řk1 ´1 j
+                                                                              s :“                                j“0 b w s j , s0 q.
+   Following the extraction of Theorem 2, for all j P rk ´ 1s we have
+                                                          1
+
+                                                                         1
+                                                       }sj }op ď p2T qk ´j
+                                                                         1
+                                                          s j } ď p2T qk ´j 2γ 1
+                                                      }sj w
+                                                           Aw
+                                                            s j “ tj .
+
+For j “ 0, we have
+                                                                         1
+                                                       }s0 }op ď p2T qk ´1
+                                                                         1
+                                                          s j } ď p2T qk ´1 2γ 1
+                                                      }s0 w
+                                                           Aw
+                                                            s 0 “ t0 .
+
+   It follows that
+                                              1 ´1
+                                             kÿ
+                        }s0 w}
+                            s “ }s0                   bj´1 w
+                                                           s j}
+                                             j“0
+                                         k1 ´1
+                                             ÿ        s0
+                                    “}           bj      sj w
+                                                            s j}
+                                         j“0
+                                                      sj
+                                          1 ´1
+                                         kÿ
+                                                                    1                         1
+                                    ď}           bj p2T qj p2T qk ´j p2γ 1 q} ` }p2T qk ´1 p2γ 1 q}
+                                         j“1
+                                                       1
+                                    ď k γp2T qk ´1 p2γ 1 q
+                                         1
+
+                                    ď γext .
+
+   For the commitment of w,
+                         s we have
+                                             1 ´1
+                                           ´kÿ          ¯
+                                      Aw
+                                       s “A       bj w
+                                                     sj
+                                                            j“0
+                                                     k1 ´1
+                                                      ÿ
+                                                                          1 ´1
+                                                                         kÿ
+                                                             j
+                                                 “           b Aw
+                                                                sj “             bj tj “ t,
+                                                      j“0                j“0
+
+where the last equality is the verifier’s
+                                   ř first check.
+   We now argue that ΦpXq :“ ni“1 powi pβqfi pXq is such that ΦpĎ ωj q “ ej . Similarly as in the
+proof of Theorem 2, combining the verification equation and Theorem 1, we create a polynomial
+                                                                                  1 ´1
+                                                                                 kÿ
+                              ÿ
+                   Ψ pYq :“         pKrs pYq ´ Qrs pYqq Zrs pYq `                        Lj pYqpΦpωj q ´ ej q.
+                              r,s                                                j“0
+
+
+                                                                   44
+Since the w
+          s j ’s are unique, the above identity holds for any accepting transcript at the evaluation
+point y. We apply the Schwartz-Zippel over rings Lemma 1 and deduce that if Ψ were non-zero,
+then
+                                                           dpk 1 ´ 1q
+                                  PYÐC k1 ´1 pΨ pYq “ 0q ď            ,
+                                                              |C|
+the verifier sampling y1 , . . . , yk1 ´1 . Hence with probability at least 1 ´ dpk|C|´1q we have Ψ “ 0 as a
+                                                                                 1
+
+
+polynomial, and by the uniqueness of the decomposition in a reduced Gröbner basis Proposition 5,
+we have
+     ř that pKrs qrs “ pQrs qrs up to syzygies and for all j P r0, k ´ 1s, Φpwj q “ ej . In particular
+                                                                          1            s
+P :“ r,s Krs Zrs is the quotient part of H, i.e.
+                                                1 ´1
+                                               kÿ
+                                     HpYq “            Lj pYq ej ` P pYq,
+                                               j“0
+
+
+which
+   ř is the decomposition the prover computes in Figure 3. We deduce from the check
+                                                                                              řk1 ´1 j ?
+                                                                                               j“0 b ej “
+e ` rs Zrs pDqKrs pDq that
+                                        1 ´1
+                                       kÿ
+                                   e“        Lj pDqej ` P pDq.
+                                            j“0
+
+It follows that Φps
+                  ω q “ e. Via Theorem 1, }s0 }op ď % and }s0 w}
+                                                              s ď γext , which completes the proof.
+
+
+
+
+                                                        45
+

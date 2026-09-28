@@ -1,0 +1,602 @@
+     1→     HyperWolf: Efficient Polynomial Commitment
+     2→                Schemes from Lattices
+     3→
+     4→                    Lizhen ZHANG, Shang GAO, and Bin XIAO
+     5→
+     6→               The Hong Kong Polytechnic University, Hong Kong, China
+     7→                          lizh6.zhang@connect.polyu.hk
+     8→                             shanggao@polyu.edu.hk
+     9→                              b.xiao@polyu.edu.hk⋆⋆
+    10→
+    11→
+    12→
+    13→         Abstract. This work introduces HyperWolf, a Hypercube-Wise Opti-
+    14→         mized polynomial commitment scheme based on Lattices over ring Fields.
+    15→         The scheme achieves succinctness with O(log N ) proof size and verifier
+    16→         time, along with linear prover cost. It supports both univariate and mul-
+    17→         tilinear polynomials under a unified framework. Inspired by the two-
+    18→         dimensional tensor structure employed in [GLS+ 21] to achieve sublinear
+    19→         efficiency, we generalize the idea to a k-dimensional tensor (hypercube)
+    20→         structure and design a k-round recursive proof protocol, where each
+    21→         round performs a dimensionality reduction, which results in an over-
+    22→         all efficiency of O(kN 1/k ). By setting k = log N , our scheme achieves
+    23→         near-optimal asymptotic performance.
+    24→         HyperWolf is fully transparent and relies only on the standard lattice
+    25→         assumption over rings. In terms of concrete efficiency, for polynomials
+    26→         with N = 225 coefficients, our scheme yields proof sizes that are 8×
+    27→         smaller than the lattice-based scheme of [CMNW24] (Crypto24), and
+    28→         over 200× smaller than SLAP [AFLN24] (Eurocrypt24). Compared to
+    29→         Greyhound [NS24] (Crypto24), our proof size is of similar magnitude,
+    30→         while achieving significantly lower verifier time.
+    31→
+    32→
+    33→Keywords: Lattice-based cryptography, Polynomial Commitment Scheme
+    34→
+    35→
+    36→1      Introduction
+    37→
+    38→A Polynomial Commitment Scheme (PCS) is a cryptographic primitive that en-
+    39→ables a prover to commit to a polynomial f —which may be univariate [KZG10]
+    40→or multilinear [GLS+ 21], [ZCF24]—by publishing a compact commitment. Later,
+    41→for given public inputs x (or ⃗x in the multilinear case) and y, the prover can
+    42→generate a succinct proof π attesting that y = f (x) or f (⃗x). For practical
+    43→efficiency, the proof size must be succinct and the verification cost must be
+    44→efficient (i.e. less than sublinear in the input size). PCS are widely used in
+    45→cryptographic protocols, enabling applications such as verifiable secret sharing
+    46→⋆⋆
+    47→     In the future, this scheme will be implemented by Mr. Kurt Pan, and he will be
+    48→     included in the author list at that time.
+    49→[BDK13], secure multi-party computation [BHV+ 23], and authentication mecha-
+    50→nisms. Their most prominent application lies in constructing zero-knowledge suc-
+    51→cinct non-interactive arguments of knowledge (zkSNARKs) [BFS20], [CHM+ 20],
+    52→[CBBZ23], [BSBHR18b], where they serve as a fundamental primitive.
+    53→    Significant research efforts have been made on PCS, however, the majority of
+    54→existing schemes depend on discrete logarithm problem assumptions [BBB+ 18],
+    55→[KZG10], [Lee21], which are vulnerable to quantum computing attacks. Although
+    56→post-quantum secure alternatives have been developed - notably those employing
+    57→error-correcting codes [BSBHR18a], [GLS+ 21] - these solutions typically com-
+    58→promise on homomorphic properties, which are essential for supporting efficient
+    59→proof composition in advanced cryptographic protocols.
+    60→    Lattice-based cryptography has emerged as a particularly promising ap-
+    61→proach for constructing quantum-resistant primitives, owing to its computa-
+    62→tional efficiency, natural homomorphic capabilities, and proven security against
+    63→quantum attacks. Despite these advantages, the development of lattice-based
+    64→polynomial commitment schemes has progressed slowly, mainly due to funda-
+    65→mental difficulties in achieving exact extractability guarantees. While recent
+    66→work has begun to address this gap, existing solutions inevitably introduce
+    67→substantial compromises. Some proposals depend on non-standard lattice as-
+    68→sumptions [WW23a], [AFLN24], whose long-term security against quantum ad-
+    69→versaries remains uncertain. Others require trusted setup procedures [HSS24],
+    70→undermining their practical applicability. Although certain constructions [NS24]
+    71→and [CMNW24] maintain transparent setup properties, they are respectively
+    72→constrained by their restriction to univariate polynomials and the computational
+    73→overhead associated with integer field operations. These limitations collectively
+    74→underscore the importance of continued research to advance lattice-based poly-
+    75→nomial commitment schemes.
+    76→
+    77→
+    78→
+    79→1.1   Related Works
+    80→
+    81→
+    82→According to the underlying construction frameworks, the existing lattice-based
+    83→polynomial commitment schemes can be broadly classified into two categories:
+    84→    Constructions Based on Inner-Product Relations. These schemes
+    85→interpret the polynomial evaluation process f (x) = y as an inner-product rela-
+    86→tion ⟨f⃗, ⃗x⟩, where ⃗x = (1, x, . . . , xN −1 ) in the univariate case [ACL+ 22, dCP23,
+    87→WW23a, CLM23]. They leverage the Bulletproofs protocol [BBB+ 18] to gener-
+    88→ate succinct proofs. However, the verification cost is linear to the polynomial
+    89→degree N because the evaluation point cannot be chosen in advance to ensure
+    90→soundness. Recent works [BCS23, FLV23] address this issue by integrating the
+    91→Dory-based delegation protocol [Lee21] or introduced more structured commit-
+    92→ment scheme for fast verification, though they still necessitate a preprocessing
+    93→phase. Furthermore, most constructions do not guarantee extractability. Only a
+    94→few schemes [FLV23, ACL+ 22, CLM23] achieve this property, but they depend
+    95→
+    96→                                           2
+    97→on non-standard lattice assumptions, such as the k-M-SIS assumption, which is
+    98→susceptible to being broken. 1
+    99→    Constructions Based on Recursive Approaches. Another approach to
+   100→constructing lattice-based polynomial evaluation schemes utilizes the recursive
+   101→computational framework. [FMN24] was the first to introduce the split-and-fold
+   102→technique from [BSBHR18a] into the lattice setting, enabling fast verification.
+   103→This advancement, however, came at the cost of relying on the new PowerBASIS
+   104→assumption, a variant of the BASIS assumption proposed in [WW23b], and re-
+   105→quired a large common reference string (CRS) of size quadratic in the input size.
+   106→A subsequent work, SLAP [AFLN24], addressed these limitations by reducing
+   107→the size of the CRS and mitigating the reliance on non-standard assumptions.
+   108→While this refinement improved efficiency, it introduced a quasi-linear prover
+   109→cost and still required a trusted setup.
+   110→    Most recently, Nguyen et al. [NS24] introduced Greyhound, a transparent
+   111→univariate polynomial commitment scheme building upon the Labrador proto-
+   112→col [BS23]. Their construction employs recursive techniques to achieve compact
+   113→proof sizes while incorporating bi-variate sum-check technique to enable sub-
+   114→linear verification time under standard lattice assumptions. Nevertheless, this
+   115→approach maintains two key limitations: it only supports univariate polynomi-
+   116→als and specifically operates under infinity norm bounds. Concurrently, Cini et
+   117→al. [CMNW24] presented an SIS-based polynomial commitment scheme with a
+   118→transparent setup that accommodates both univariate and multilinear polynomi-
+   119→als. While this construction achieves broader functionality, it incurs substantial
+   120→computational overhead due to its reliance on integer field arithmetic.
+   121→    Building on the discussion above, this work explores the following research
+   122→question:
+   123→    Can we design a general PCS for univariate and multilinear polynomials,
+   124→based on standard lattice assumptions, that supports a transparent setup, nearly
+   125→optimal (logarithmic level) proof size and verification time, and linear prover
+   126→time?
+   127→
+   128→
+   129→1.2    Our Contributions
+   130→
+   131→We answer the above question in the affirmative by introducing HyperWolf, a
+   132→novel and efficient lattice-based proof system that achieves all the desired prop-
+   133→erties. We present three main contributions, each of independent interest.
+   134→    Unified Framework. First, we identify and formalize a common algebraic
+   135→structure shared by univariate and multilinear polynomial evaluations, and pro-
+   136→pose a unified framework that accommodates both cases. This framework is
+   137→flexibly parameterized, allowing it to specialize to either setting through the
+   138→adjustment of auxiliary parameters.
+   139→    Recursive-Friendly Proof System. Our second contribution is the design
+   140→of a proof system works in recursive manner for the unified framework. This
+   141→1
+   142→    The k-M-SIS assumption has been demonstrated to be insecure in [WW23a].
+   143→
+   144→
+   145→                                        3
+   146→construction is inspired by the “bivariate” paradigm, which has been widely em-
+   147→ployed in prior works such as [NS24], [GLS+ 21], and [EG25] to achieve sublinear
+   148→proof sizes and verifier time. The core idea behind these schemes is to reinterpret
+   149→the witness—specifically, the coefficient vector f⃗ in a PCS—as a vector of length
+   150→N , and express the proof relation as an inner product ⟨f⃗, ⃗x⟩ = y. By reshaping
+   151→f⃗ into an n × n matrix with n2 = N , the original relation can be decomposed
+   152→to two sub-relations: first, an inner product between a length-n vector and an
+   153→n × n matrix; second, an inner product between two vectors of length n, which
+   154→can then be proved using a bivariate sumcheck protocol. Each sub-proof yields
+   155→an O(n)-size proof and supports O(n)-time verification, resulting in an overall
+   156→sublinear proof system that maintains completeness and soundness.
+   157→    In our proposed scheme, we generalize and extend this idea by reshaping
+   158→a length-N witness into a k-dimensional hypercube structure, and designing
+   159→a k-round recursive proof system where each round performs a reduction of
+   160→knowledge from a high-dimensional relation to one with dimension decreased
+   161→by one. Crucially, both the proof size and verification time in each round are
+   162→bounded by O(N 1/k ). After completing all k rounds, the total cost accumulates
+   163→to O(k · N 1/k ). Notably, by optimizing the parameter choice to k = log N , both
+   164→the proof size and verifier time can be reduced to O(log N ), achieving near-
+   165→optimal asymptotic efficiency. Furthermore, our scheme maintains linear prover
+   166→complexity. A comprehensive performance comparison between our scheme and
+   167→existing post-quantum schemes is presented in Table 1 and Table 2.
+   168→
+   169→
+   170→ Scheme    Assump. Transp. CRS Commit.          Proof       Prover   Verifier Sound.
+   171→                      Set   Size     Size        Size        Cost      Cost     Error
+   172→   [ZCF24]    Hash     Y     /       O(1)      O(log N ) O(N log N ) O(log2 N ) neg(λ)
+   173→                                                   √                     √
+   174→ [GLS+ 21]    Hash     Y     /       O(1)       O( N )       O(N )    O( N )    neg(λ)
+   175→  [FMN24]   P-BASIS    N   O(N 2 )   O(1)      O(log N )    O(N 2 )  O(log N ) 1/poly(λ)
+   176→ [AFLN24] M-SIS(ℓ2 )   N  O(log N )  O(1)      O(log2 N )    O(N )   O(log2 N ) neg(λ)
+   177→[CMNW24] M-SIS(ℓ∞ )    Y     /      O(log N ) O(log2 N )     O(N )   O(log N ) neg(λ)
+   178→                                                                         √
+   179→    [NS24] M-SIS(ℓ∞ )  Y     /       O(1)     O(log log N )  O(N )    O( N )    neg(λ)
+   180→ HyperWolf M-SIS(ℓ2 )  Y     /       O(1)      O(log N )     O(N )   O(log N ) neg(λ)
+   181→
+   182→Table 1: Asymptotic performance comparison of HyperWolf and prior post-quantum
+   183→PCS schemes.
+   184→
+   185→
+   186→
+   187→
+   188→               Scheme       N = 215    N = 220    N = 225    N = 230
+   189→               [FMN24]     –          36.5 MB         –   767 MB
+   190→               [NS24]      –              –        46 KB   53 KB
+   191→               [CMNW24] 120 KB        501 KB      1.51 MB 5.17 MB
+   192→               HyperWolf 80.28 KB 130.44 KB 180.59 KB 230.8 KB
+   193→
+   194→Table 2: Concrete efficiency comparison of lattice-based polynomial commitment
+   195→schemes under 128-bit security. The table shows proof sizes (in KB/MB) for vary-
+   196→ing degrees N . Missing entries (–) indicate cases not reported in the original works.
+   197→
+   198→                                          4
+   199→    Optimization over Ring Field. Our final contribution is to adapt the
+   200→proposed proof system to operate over ring fields, which further reduces compu-
+   201→tational overhead while significantly enhancing soundness. In particular, when
+   202→challenges are sampled from a ring, the challenge space becomes substantially
+   203→larger under the same ℓ2 -norm constraint. For instance, consider the ring Rq [X] :=
+   204→Zq [X]/(X 64 + 1). Even when restricting each coefficient of a challenge polyno-
+   205→mial within {0, ±1, ±2}, we can, by carefully controlling the frequency of each
+   206→value within a given norm bound, construct a challenge space of more than 2128
+   207→size. See Section 5.2 for concrete details.
+   208→
+   209→
+   210→2     Preliminaries
+   211→
+   212→2.1    Notation
+   213→
+   214→ Let λ be the security parameter, implicitly given to all algorithms. A function
+   215→ neg(λ) is negligible, and all key parameters are assumed to be poly(λ). For n ∈ N,
+   216→ let [n] := {0, 1, . . . , n−1}, and define [a:b] := {a, a+1, . . . , b−1} for integers a < b.
+   217→ Let q be an odd modulus, and define Zq := Z/qZ. Vectors in Znq are written as
+   218→ f⃗ = (f0 , . . . , fn−1 ), and matrices over Zq use uppercase letters (e.g., A, B). Let
+   219→⃗1m denote the vector of length m with all entries equal to 1.
+   220→      We denote by Zq [X] the ring of polynomials over Zq . For d a power of two,
+   221→ define R := Z[X]/(X d +1) and Rq := Zq [X]/(X d +1). Bold symbols (e.g., f ∈ Rq )
+   222→ denote ring elements, except for challenges; the constant term of f is ct(f ) := f0 .
+   223→ Bold uppercase letters denote matrices over Rq . The concatenation of length-
+   224→ n vectors ⃗f and ⃗g is denoted by (⃗f , ⃗g) ∈ R2n    q . Similarly, the concatenation of a
+   225→                                      ⃗
+   226→ sequence of length-n vectors (fi )i∈[k] lies in Rkn                                     m×n
+   227→                                                        q . And for matrices A, B ∈ Rq       ,
+   228→                           m×2n                        n
+   229→ we write [A B] ∈ Rq            . For a vector ⃗a ∈ Rq , the i-th entry is denoted ai or a[i].
+   230→ Note that though Zq elements can be considered as Rq elements with higher-
+   231→ degree coefficients equal to zero, we do not use boldface letters to represent
+   232→ them.                                                                          Pd−1
+   233→      Norms. We define the ℓ1 -norm,       q ℓ2 -norm and ℓ∞ -norm for f := i=0 fi X i ∈
+   234→                      Pd−1                   Pd−1 2
+   235→ Rq as: ∥f ∥1 := i=0 |fi |, ∥f ∥2 :=             i=0 fi and ∥f ∥∞ := maxi∈[d] |fi . And for
+   236→⃗f := (f0 , · · · , fm−1 ) ∈ Rm , its ℓ1 -norm, ℓ2 -norm and ℓ∞ -norm are:
+   237→                               q
+   238→                                               v
+   239→                    m−1
+   240→                    X
+   241→                                               um−1
+   242→                                               uX
+   243→        ∥⃗f ∥1 :=         ∥fi ∥1 ,   ∥⃗f ∥2 := t    ∥fi ∥22 ,   ∥⃗f ∥∞ := max (∥fi ∥∞ ).
+   244→                                                                         i∈[m]
+   245→                    i=0                          i=0
+   246→
+   247→
+   248→Unless otherwise specified, ∥ · ∥ refers to the ℓ2 norm in this paper.
+   249→    Challenge Space. Throughout the paper, we define the subset C ⊂ Rq as a
+   250→challenge space if the difference of any two distinct elements in C is invertible in
+   251→Rq . Additionally, we require that ∥c∥ ≤ τ and ∥c∥op ≤ T for all c ∈ C, where τ
+   252→and T are constants in Z. Here, ∥c∥op := supv∈Rq ∥cv∥∥v∥ can be interpreted as the
+   253→maximum norm of the operator c acting on any v ∈ Rq .
+   254→
+   255→
+   256→                                                  5
+   257→    The following lemma establishes the conditions for invertibility in polynomial
+   258→rings, as proposed by Lyubashevsky and Seiler [LS18].
+   259→Lemma 1. (Invertibility Condition) When the prime q satisfies q ≡ 5 mod 8
+   260→, any f ∈ Rq that meets the condition 0 < ∥f ∥ < q 1/2 has an inverse in Rq .
+   261→    Compose and Decompose Gadget Matrix. Let a ∈ N. We define the
+   262→gadget vector ⃗ga := (1, a, a2 , . . . , aι−1 ), where ι = ⌈loga q⌉. For a matrix A ∈
+   263→Rm×n
+   264→  q    , we can decompose it into Ã ∈ Rqιm×n such that A = Ga,m Ã, where the
+   265→gadget matrix is defined as Ga,m := Im ⊗ ⃗gaT ∈ Zm×ιm       q    , with Im denoting the
+   266→identity matrix of size m × m, and ⊗ denoting the Kronecker product. Formally,
+   267→we define the decomposition function G−1         a,m : Rq
+   268→                                                         m×n
+   269→                                                              → Rιm×n
+   270→                                                                   q    , which maps A
+   271→                                       −1
+   272→to Ã. Obviously, we have Ga,m Ga,m (A) = A, and for each column Ãi of Ã, we
+   273→                  √
+   274→have ∥Ãi ∥ ≤ a2      ιm for i ∈ [n].
+   275→    The Conjugation Automorphism. Pd−1             Define the conjugation automorphism
+   276→σ−1 : Rq → Rq . For any f = i=0 fi X i ∈ Rq , the automorphism is given by:
+   277→            Pd−1
+   278→σ−1 (f ) := i=0 fi X −i . For vectors ⃗a, ⃗b ∈ Rnq , let their coefficients representa-
+   279→tions be ⃗a, ⃗b ∈ Znd
+   280→                   q , respectively.   The inner product between ⃗a and ⃗b is equal to
+   281→                        D            E
+   282→the constant term of σ−1 (⃗a), ⃗b .
+   283→   Integer-to-Ring Mapping. Given a vector f⃗ = (f0 , f1 , . . . , fnd−1 ) ∈ Zndq ,
+   284→we define the mapping MR : Znd  q   →  R n
+   285→                                         q such   that
+   286→                                                                           
+   287→                     Xd−1          d−1
+   288→                                   X                      d−1
+   289→                                                          X
+   290→          MR (f⃗) =      fj X j ,     fd+j X j , . . . ,     f(n−1)d+j X j  ,
+   291→                        j=0        j=0                 j=0
+   292→
+   293→where each component is interpreted as an element in Rq .
+   294→
+   295→2.2   Lattice Problems and Ajtai Commitment
+   296→We recall the standard Module-SIS [LS15] assumption.
+   297→Definition 1. (MSISκ,n,q,β ) Given a random matrix A ∈ Rκ×n  q   for κ = poly(n),
+   298→the goal of the problem is to find a non-zero ⃗z ∈ Rnq such that A⃗z = ⃗0 over Rq
+   299→and ∥⃗z∥ ≤ β.
+   300→   Micciancio and Regev [MR09] demonstrated that an    MSIS√ algorithm is ex-    
+   301→                                                           2 dκ log q log(1.0045)
+   302→pected to produce a solution with norm ∥⃗z∥ ≥ min q, 2                              ,
+   303→where d is the degree of the irreducible polynomial used to construct the poly-
+   304→nomial ring Rq .
+   305→   Ajtai commitment scheme. We review the Ajtai commitment scheme
+   306→[Ajt96] where the messages are ring elements with small norms.
+   307→
+   308→Definition 2. (Ajtai Commitment [Ajt96]) Let λ be the security parameter
+   309→and κ, q, β be positive integers. Suppose a prover commits to a n-dimensional
+   310→short vector ⃗f ∈ Rnq (with small norms). The Ajtai commitment is as follows:
+   311→
+   312→
+   313→                                          6
+   314→                                     $
+   315→ – Setup(1λ ): Sample a matrix G ← Rκ×n
+   316→                                      q    . Output pp := G.
+   317→ – Commit(pp, f ): Given f such that ∥f ∥ ≤ β, output cm := G⃗f .
+   318→               ⃗         ⃗            ⃗
+   319→
+   320→    A commitment scheme is said to be binding if it is computationally infeasible
+   321→to find two distinct openings for the same commitment, and hiding if it reveals
+   322→no information about the underlying message.
+   323→    The commitment cm satisfies the binding property for inputs ∥⃗f ∥ < β under
+   324→the assumption that MSISκ,n,q,2β is hard. Hiding can be achieved by appending
+   325→a small random vector to the message. For simplicity, we treat this randomness
+   326→as part of the witness throughout our protocols.
+   327→
+   328→2.3   Interactive Proofs and Polynomial Commitment Schemes
+   329→Let R ⊆ {0, 1}∗ × {0, 1}∗ × {0, 1}∗ be a ternary relation. For (pp, x, w) ∈ R, we
+   330→denote that pp as the public parameters, x as a statement and w as a witness
+   331→for x. For fixed pp and x, we define the set R(pp, x) := {w : (pp, x, w) ∈ R}.
+   332→Definition 3. (Interactive Proof System) An interactive proof system Π =
+   333→(S, P, V) for the relation R is an interactive protocol that consists of the prob-
+   334→abilistic polynomial-time (PPT) setup algorithm S and a protocol between an
+   335→interactive PPT prover P and an interactive verifier V. This system enables
+   336→the prover to convince the verifier of the existence of a witness w for a public
+   337→statement x. Both P and V receive the statement x and the public parameters
+   338→pp generated by the setup algorithm S as public input. Additionally, P has pri-
+   339→vate input in the form of a witness w ∈ R(pp, x). At the end of the protocol,
+   340→V either accepts or rejects the prover’s claim of knowing a witness w such that
+   341→(pp, x, w) ∈ R. Consequently, we classify the corresponding transcript (i.e., the
+   342→collection of all messages exchanged during the protocol execution) as either ac-
+   343→cepting or rejecting.
+   344→Definition 4. (Completeness) A proof system Π = (S, P, V) for the relation
+   345→R satisfies completeness with completeness error ϵ(·) if for all adversaries A,
+   346→                            pp ← S(1λ )
+   347→                                                             
+   348→
+   349→ Pr b = 0 ∧ (pp, x, w) ∈ R (x, w) ← A(pp)                     = ϵ(λ) + neg(λ).
+   350→                            (tr, b) ← ⟨P(pp, x, w), V(pp, x)⟩
+   351→
+   352→
+   353→Furthermore, we say that Π satisfies perfect completeness when ϵ = 0
+   354→Definition 5. (Knowledge Soundness) A proof system Π = (S, P, V) for
+   355→the relation R is knowledge sound with knowledge error ε(·) if there exists an
+   356→expected PPT extractor E such that for any stateful PPT adversary P ∗ :
+   357→                             pp ← S(1λ )
+   358→                                                                 
+   359→                            (x, st) ← P ∗ (pp)                   
+   360→ Pr b =  1 ∧ (pp, x, w) ∈
+   361→                         / R                                       = ε(λ) + neg(λ).
+   362→                            (tr, b) ← ⟨P ∗ (pp, x, w), V(pp, x)⟩ 
+   363→                             w ← EP ∗ (pp, x)
+   364→
+   365→
+   366→
+   367→                                         7
+   368→The extractor E has a black-box oracle access to the (malicious) prover P ∗ and
+   369→can rewind it to any point in the interaction.
+   370→     We then revisit the definition of polynomial commitment schemes.
+   371→Definition 6. (Polynomial Commitment Scheme) Let PC=(Setup, Commit,
+   372→Open, Eval) be a tuple of probabilistic polynomial-time algorithms. PC is a com-
+   373→mitment scheme over M = Z<N   q [X] with slack space SL if it follows the syntax
+   374→outlined below:
+   375→ – Setup(1λ ) → pp: Take security parameter λ and output public parameter pp.
+   376→ – Commit(pp, f ) → (cm, st): Take public parameters pp, a message f and out-
+   377→   put a commitment cm and decommitment state st.
+   378→ – Open(pp, cm, f, st, s) → 0/1: Take public parameters pp, a commitment cm,
+   379→   a message f , a decommitment state st and a relaxation factor s ∈ SL and
+   380→   output a bit indicating whether cm is a valid commitment to f under pp. 2
+   381→ – Eval(pp, cm, x, y; (f, st)) is a protocol between the prover P and V with public
+   382→   parameters, commitment cm, an evaluation point x and a value y. P ad-
+   383→   ditionally knows a polynomial f and P wants to convince V that f is an
+   384→   opening to cm and f (x) = y.
+   385→   The polynomial commitment scheme must satisfy three main properties: eval-
+   386→uation completeness, weak binding and knowledge soundness.
+   387→Definition 7. (Evaluation Completeness) A polynomial commitment scheme
+   388→PC = (Setup, Commit, Open, Eval) satisfies completeness if for every polynomial
+   389→f and any evaluation point u ∈ Z:
+   390→
+   391→                       pp ← S(1λ )
+   392→                                                            
+   393→      Eval.V(pp, cm,
+   394→ Pr                   (cm, st) ← Commit(pp, f )              = ϵ(λ) + neg(λ).
+   395→      u, f (u), π) = 0
+   396→                       π ← Eval.P(pp, cm, u, f (u); (f, st))
+   397→
+   398→Definition 8. (Weak Binding) A polynomial commitment scheme PC = (Setup,
+   399→Commit, Open, Eval) satisfies weak binding if for every PPT adversary A:
+   400→
+   401→      f ̸= f ′ ∧ f, f ′ ∈ R<N [X]∧
+   402→                                                                                
+   403→                                                      λ
+   404→                                     pp ←  Setup(1      )
+   405→Pr      Open(pp, cm, f, st, c)                                                   = neg(λ).
+   406→                         ′  ′ ′      (cm, (f, st, c), (f ′ , st′ , c′ )) ← A(pp)
+   407→     = Open(pp, cm, f , st , c ) = 1
+   408→
+   409→Definition 9. (Knowledge Soundness) A polynomial commitment scheme
+   410→PC = (Setup, Commit, Open, Eval) is knowledge sound with knowledge error ε(·)
+   411→if for all stateful PPT adversary P ∗ , there exists an expected PPT extractor E
+   412→such that:
+   413→                                    pp ← S(1λ )
+   414→                                                                     
+   415→     o = Open(pp, cm, f, st, s)    (cm, u, z, π) ← P ∗ (pp)          
+   416→Pr  b = 1 ∧ (o ̸= 1 ∨ f (u) ̸= z) b ← Eval.V(pp, cm, u, z, π)
+   417→                                                                       = ε(λ)+neg(λ).
+   418→                                                                      
+   419→                                    (f, st, s) ← EP (pp, cm, u, z, π)
+   420→                                                   ∗
+   421→
+   422→2
+   423→    We implicitly assume b = 0 if s ∈
+   424→                                    / SL.
+   425→
+   426→
+   427→                                            8
+   428→2.4    Coordinate-Wise Special Soundness
+   429→Coordinate-Wise Special Soundness is an extension of the concept of special
+   430→soundness, which can lead to knowledge soundness for a (2µ + 1)-round interac-
+   431→tive proof system, as proposed in [FMN24].
+   432→    First, consider two vectors ⃗x := (x1 , x2 , · · · , xℓ ), ⃗y := (y1 , y2 , · · · , yℓ ) ∈ S ℓ .
+   433→We define a relation ≡i for i ∈ [ℓ] as follows:
+   434→
+   435→                        ⃗x ≡i ⃗y ⇔ xi ̸= yi ∧ ∀j ∈ [ℓ] \ {i}, xj = yj .
+   436→
+   437→This means that the vectors ⃗x and ⃗y are identical in all coordinates except for
+   438→the i-th one. Next, we define the set:
+   439→                                                                                         
+   440→                                                   ∃e ∈ [K], ∀i ∈ [ℓ],                   
+   441→SS(S, ℓ, k) := {⃗x1 , ⃗x2 , . . . , ⃗xK } ⊆ (S ℓ )K ∃J = {j1 , . . . , jk−1 } ⊆ [K] \ {e}, ,
+   442→                                                    ∀j ∈ J, ⃗xe ≡i ⃗xj
+   443→                                                                                         
+   444→
+   445→where K := ℓ(k − 1) + 1. The interpretation of the set SS(S, ℓ, k) is that there
+   446→exists a “central” vector ⃗xe such that for each coordinate of ⃗xe , there are k − 1
+   447→other vectors that differ from it only at that coordinate. In essence, for every
+   448→coordinate, there are k vectors that differ from each other only in that coordinate
+   449→with ⃗xe always being one of them.
+   450→
+   451→Definition 10. (CWSS for Multi-Round Protocols) Let Π = (S, P, V) be
+   452→public-coin (2µ + 1)-round interactive proof system for relation R, where in each
+   453→round the challenge space of V is defined as C = S ℓ . A tree of transcripts is a
+   454→set of K = (ℓ(k − 1) + 1)µ arranged in the tree structure: The nodes in the tree
+   455→correspond to the prover’s messages and the edges correspond to the verifier’s
+   456→challenges. Each node at depth i has exactly ℓ(k − 1) + 1 children corresponding
+   457→to ℓ(k − 1) + 1 distinct challenges which, as a set of vectors, lie in SS(S, ℓ, k).
+   458→Every transcript corresponds to exactly one path from the root to a leaf node.
+   459→We say that Π is ℓ-coordinate-wise k-special sound if there is a polynomial time
+   460→algorithm that, given a statement x and the tree of transcripts, outputs a witness
+   461→w ∈ R(i, x).
+   462→
+   463→   Notably, when ℓ = 1, this definition reduces to the standard k-special sound-
+   464→ness property.
+   465→
+   466→Definition 11. (Round-by-Round Coordinate-Wise Special Soundness)
+   467→Let Π = (S, P, V) be a (2µ + 1)-message interactive proof system structured in a
+   468→recursive manner for a relation R. The protocol Π is said to be round-by-round
+   469→ℓ-coordinate-wise k-special sound for the sequence of relations (Rµ−i )i∈[µ+1] if
+   470→the challenge space in each round is S ℓ , and for any i ∈ [µ], there exists an
+   471→extractor Exti such that, given a statement xi and a set of ℓ(k − 1) + 1 accept-
+   472→ing transcripts (πi , ci,j , wi+1,j )j∈[ℓ(k−1)+1] , with the challenges (ci,j )j∈[ℓ(k−1)+1]
+   473→belonging to SS(S, ℓ, k), where πi is the i-th round common first message, each
+   474→wi+1,j corresponds to a next-round witness satisfying (xi+1,j , wi+1,j ) ∈ Rµ−i−1 ,
+   475→the extractor returns a witness wi such that (xi , wi ) ∈ Rµ−i .
+   476→
+   477→                                                 9
+   478→Lemma 2. (Theorem 2 in [CMNW24]): Let Π = (S, P, V) be a (2µ + 1)-
+   479→message public-coin interactive proof system structured in a recursive manner
+   480→for a relation R with associated relations (Rµ−i )i∈[µ+1] . If Π is round-by-round
+   481→ℓ-coordinate-wise k special sound for the tuple of relations (Rµ−i )i∈[µ+1] and
+   482→(ℓ + 1)µ = poly(λ), then Π is knowledge sound for the relation R with knowledge
+   483→error µℓ(k − 1)/|S|.
+   484→
+   485→2.5   Reduction of Knowledge
+   486→We recall the definition of reduction of knowledge from [KP23].
+   487→Definition 12. (Reduction of Knowledge [KP23]) Let λ be a security pa-
+   488→rameter. Given two relations R1 and R2 , denote ⟨P, V⟩ be an interactive protocol
+   489→between a prover P and a verifier V. A reduction of knowledge protocol Π from
+   490→R1 to R2 consists of the following algorithms:
+   491→ – Setup(1λ ) → pp: Output public parameters pp.
+   492→ – ⟨P(pp, u1 , w1 ), V(pp, u1 )⟩ → (u2 , w2 ): On input public parameters pp, a shared
+   493→   public statement u1 , P (with a witness w1 such that (u1 , w1 ) ∈ R1 ) and V
+   494→   engage in Π. At the end of Π, P and V output u2 (or ⊥ if abort), P addi-
+   495→   tionally outputs w2 .
+   496→    Reduction of knowledge protocols satisfy the following properties:
+   497→    Completeness. For every PPT adversary A that adaptively chooses an R1
+   498→instance (u1 , w1 ) ← A(pp) when given pp ← Setup(1λ ), the protocol execution
+   499→(u2 , w2 ) ← ⟨P(pp, u1 , w1 ), V(pp, u1 )⟩ satisfies (u2 , w2 ) ∈ R2 if (u1 , w1 ) ∈ R1 .
+   500→    Knowledge soundness. For every expected polynomial-time adversary A
+   501→and malicious prover P ∗ , there is an expected polynomial-time extractor E such
+   502→that given pp ← Setup(1λ ) and (u1 , w1∗ ) ← A(pp),
+   503→
+   504→       Pr u1 , E(pp, u1 , w1∗ ) ∈ R1 ≈ Pr ⟨P ∗ (pp, u1 , w1∗ ), V(pp, u1 )⟩ ∈ R2 .
+   505→                                                                                 
+   506→
+   507→
+   508→   Public reducibility. There is a deterministic polynomial-time algorithm f ,
+   509→such that for any PPT adversary A and a malicious expected polynomial-time
+   510→prover P ∗ , given
+   511→
+   512→ pp ← Setup(1λ ),     (u1 , w1∗ ) ← A(pp),    (u2 , w2 ) ← ⟨P ∗ (pp, u1 , w1∗ ), V(pp, u1 )⟩,
+   513→
+   514→and the transcript tr, we have f (pp, u1 , tr) = u2 .
+   515→    By the composition theory [KP23], the reduction of knowledge protocols can
+   516→be composed. For two (or multiple) reduction of knowledge protocols Π1 and
+   517→Π2 , they can be composed in two ways [KP23]: sequential composition Π1 ⋄ Π2
+   518→and parallel composition Π1 × Π2 .
+   519→Theorem 1. Sequential composition (Theorem 5 in [KP23]). Let R1 ,
+   520→R2 , R3 be three relations. Given two reduction of knowledge protocols, Π1 from
+   521→R1 to R2 and Π2 from R2 to R3 , the composed protocol Π1 ⋄ Π2 is a reduction
+   522→of knowledge from R1 to R3 .
+   523→
+   524→
+   525→                                             10
+   526→Theorem 2. Parallel composition (Theorem 6 in [KP23]). Let R1 , R2 ,
+   527→R3 , R4 be four relations. Given two reduction of knowledge protocols, Π1 from
+   528→R1 to R2 and Π2 from R3 to R4 , the composed protocol Π1 × Π2 is a reduction
+   529→of knowledge from (R1 × R3 ) to (R2 × R4 ).
+   530→
+   531→
+   532→2.6   Modular Johnson-Lindenstrauss Lemma
+   533→
+   534→To prove that a vector ⃗a ∈ Zn has a small ℓ2 -norm without revealing the entire
+   535→vector, we can utilize the Johnson-Lindenstrauss (JL) Lemma. The key intuition
+   536→behind the JL Lemma is that a random linear projection of the original vector
+   537→approximately preserves its ℓ2 -norm. Specifically, instead of disclosing ⃗a directly,
+   538→the verifier can generate a random linear matrix Π ∈ Z256×n , where the entries
+   539→of Π are independent and take values −1, 0, and 1 with probabilities 1/4, 1/2,
+   540→and 1/4, respectively. The prover then reveals the projected vector p⃗ = Π⃗a. The
+   541→norm of p⃗ can then be used to approximate and infer the norm of ⃗a through the
+   542→following lemma [GHL22], [BS23].
+   543→
+   544→Lemma 3. Modular Johnson–Lindenstrauss Variant: Let q ∈ N, D be a
+   545→distribution on {0, ±1} such that D(1) = D(−1) = 41 and D(0) = 12 . For every
+   546→vector ⃗a ∈ Znq with ∥⃗a∥ ≤ b and b ≤ q/125, we have:
+   547→
+   548→                       Pr      [∥Π⃗a     mod q∥2 < 30b2 ] ⪅ 2−128 .
+   549→                   Π←D 256×n
+   550→
+   551→
+   552→
+   553→
+   554→3     Technique Overview
+   555→
+   556→In this section, we present the core intuition and techniques of our work. Our
+   557→goal is to construct a unified polynomial commitment scheme that supports both
+   558→univariate and multilinear polynomials. To accomplish this, we first analyze their
+   559→evaluation procedures, extract a common structural pattern, and abstract them
+   560→into a general relation. We then design a proof system for this relation, which, by
+   561→instantiating appropriate parameters, yields concrete polynomial commitment
+   562→schemes for both cases.
+   563→
+   564→
+   565→3.1   Analysis of the Polynomial Evaluation Procedure
+   566→
+   567→We begin by reviewing the evaluation procedures for univariate and multilinear
+   568→polynomials. As shown in [GLS+ 21], both can be expressed uniformly as:
+   569→                                                           
+   570→                        f0        f1     · · · fb0 −1
+   571→                   fb0        fb0 +1   · · · f2b0 −1       
+   572→              y =                                      · ⃗
+   573→                                                           a 0 · ⃗
+   574→                                                                  a1 ,     (1)
+   575→                                                           
+   576→                         ..        ..    ..       ..   
+   577→                        .         .        .     .         
+   578→                        f(b1 −1)b0 f(b1 −1)b0 +1 · · · fb1 b0 −1
+   579→
+   580→                                             11
+   581→where N = b1 b0 is the total number of coefficients, and ⃗a0 , ⃗a1 are auxiliary
+   582→evaluation vectors.                                                    PN −1
+   583→   In the univariate setting, the polynomial is given by f (X) := i=0 fi X i
+   584→and the evaluation point is u ∈ Zq , we define the vectors ⃗a0 and ⃗a1 as follows:
+   585→                             b0 −1
+   586→                          logO
+   587→                                            i
+   588→                 ⃗a0 :=              (1, u2 ) = (1, u, . . . , ub0 −1 ) ∈ Zbq0 ,
+   589→                            i=0
+   590→                             b1 −1
+   591→                          logO
+   592→                                            i
+   593→                 ⃗a1 :=              (1, u2 b0 ) = (1, ub0 , . . . , u(b1 −1)b0 ) ∈ Zbq1 .
+   594→                            i=0
+   595→
+   596→While in the multilinear setting, the polynomial is defined as f (X0 , X1 , . . . , Xℓ−1 ) :=
+   597→f0 +f1 X0 +f2 X1 +· · ·+fN −1 X0 X1 · · · Xℓ−1 for N = 2ℓ and the evaluation point
+   598→is ⃗u ∈ Zℓq , the vectors ⃗a0 and ⃗a1 are :
+   599→                            b0 −1
+   600→                         logO                                          ℓ−1
+
+[showing lines 1-600 of 2021; use offset=601 with limit to continue reading]

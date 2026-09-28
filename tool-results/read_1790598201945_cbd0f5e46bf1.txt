@@ -1,0 +1,702 @@
+     1→ ProtogaLattice: Lattice-based Algebraic Folding
+     2→
+     3→ David Balbás1 , Anca Nitulescu2 , and Maxime Plançon3
+     4→ 1
+     5→ ETH Zürich, Zurich, Switzerland
+     6→ 2
+     7→ Input Output, France
+     8→ 3
+     9→ Input Output, Switzerland
+    10→
+    11→ Abstract. Folding schemes are gaining traction recently as they are suited to prove streaming com-
+    12→ putations with low memory footprint. In particular, there has been a growing interest in post-quantum
+    13→ folding schemes for more expressive relations, and with improved proof sizes. While the landscape is
+    14→ vast, every lattice-based construction, such as Latticefold+, (Super)Neo, and Cyclo, heavily rely on the
+    15→ sumcheck protocol. Sumcheck gives efficient proving times, but the verifier circuits become very large,
+    16→ partially because of the many random oracle invocations required. When folding sequential computa-
+    17→ tions, this significantly inflates the recursive overhead, as the prover must run the verification at every
+    18→ iteration.
+    19→ We present ProtogaLattice, a new lattice-based folding scheme for general high-degree polynomial
+    20→ relations that drastically reduces the size of the verifier’s circuits. Our folding backbone deviates from
+    21→ the sumcheck approach and uses algebraic techniques. Our contribution is twofold:
+    22→ i) a folding scheme that combines multiple instances of polynomial relations into accumulators for a
+    23→ bounded number of iterations, and
+    24→ ii) a bootstrapping protocol to reduce the norm of the witnesses underlying these accumulators, which
+    25→ can be used in complement to our bounded-depth folding scheme to unlock unlimited depth.
+    26→ A full iteration of ProtogaLattice for witnesses of length 230 gives a 4ˆ shorter proof size than the
+    27→ state-of-the-art, with only 8.13 KB. Additionally, ProtogaLattice requires less random oracle evaluations
+    28→ and achieves a smaller verifier circuit than its sumcheck counterparts.
+    29→ Our techniques open new directions towards building efficient lattice-based proofs for expressive
+    30→ relations and that present small recursion overheads, challenging the established sumcheck-based ap-
+    31→ proaches.
+    32→
+    33→1 Introduction
+    34→
+    35→Folding Schemes, first introduced by Nova [KST22], allow one to accumulate multiple instances of
+    36→an NP relation into a single small instance while preserving satisfiability. As a better alternative
+    37→to classical recursive proof systems, such techniques unlock efficient instantiations of incrementally
+    38→verifiable computation (IVC) [Val08] or proof carrying data (PCD) [CT10].
+    39→ Works that build recursive proof schemes [BCMS20,BCL` 21] show how to amortize the recursive
+    40→costs by aggregating some parts of the proof, while the recursive statement only checks that the
+    41→aggregation was done correctly. These ideas were further developed into more efficient ways to
+    42→accumulate statements and defer hard computations, which led to the emergence of multiple folding
+    43→schemes.
+    44→ Recently, numerous works have extended the folding paradigm, improving efficiency, generality,
+    45→and modularity.
+    46→ In a nutshell, folding schemes allow one to aggregate multiple instances of a computational
+    47→relation into a single instance that captures their joint validity via the reduction of knowledge
+    48→abstraction [KP23]. To illustrate reductions of knowledge, let Ξ and Ξ ˚ be two instance–witness
+    49→relations. We denote instances by t and their corresponding witnesses by w. A reduction of knowl-
+    50→edge from Ξ to Ξ ˚ is an interactive protocol Π between a prover and a verifier with the following
+    51→structure: the verifier takes as input an instance t1 for Ξ, interacts with the prover, and outputs an
+    52→instance t2 for Ξ ˚ . The security property of reductions of knowledge ensures that if the prover can
+    53→subsequently produce a valid witness w2 (such that pt2 , w2 q P Ξ ˚ ), then there exists an efficient
+    54→extractor that recovers a valid witness w1 (such that pt1 , w1 q P Ξ).
+    55→ Then, a folding scheme for k witnesses is simply a reduction of knowledge tailored to accumu-
+    56→lations, which goes from a product relation Ξ ˚ ˆ Ξ k Ñ Ξ ˚ . Here, Ξ is the base relation and Ξ ˚ is
+    57→an accumulation relation whose instance compactly represent prior computation steps.
+    58→ To construct IVC, the prover can fold a sequence of computation steps into a single accumulator
+    59→instance whose size remains essentially fixed, which leads to memory-efficient proving. At the end
+    60→of the computation, it suffices to prove knowledge of a witness for the final Ξ ˚ instance.
+    61→ Folding schemes are characterized by their expressiveness, which is essentially the class of rela-
+    62→tions that they can fold. Given a witness w and an instance t, a general relation takes the form
+    63→
+    64→ Ξ “ tpt, wq : f pwq “ 0 ^ t “ cmpwqu ,
+    65→
+    66→where f is a polynomial map of total degree at most d, and cm is an additive homomorphic
+    67→commitment scheme. Depending on the form of f , a folding scheme may capture standard constraint
+    68→systems used in succinct arguments such as R1CS, Plonkish, CCS, or even arbitrary polynomial
+    69→constraints. Generally, supporting large d and arbitrary polynomial maps f is preferred as it enables
+    70→more efficient arithmetizations, improving the practicality.
+    71→ Without aiming to be exhaustive4 , we categorize folding schemes in two big families:
+    72→ Algebraic folding schemes define the folding step as a closed algebraic transformation on the rela-
+    73→tion itself, so each fold is implemented by evaluating and linearly combining polynomial constraints
+    74→on the relation witnesses directly. Then, the verifier combines the instances leveraging an additive
+    75→homomorphic commitment scheme. Examples include Nova [KST22] and FLIP-and-Prove [NPR26]
+    76→for quadratic relations, and Protostar [BC23] and Protogalaxy [EG23] for high-degree, arbitrary
+    77→polynomial relations.
+    78→ Sumcheck-based folding schemes such as Hypernova [KS24] or FLI [GM24] phrase the fold-
+    79→ing as a claim about a big polynomial (or about products of multilinear polynomials) and then
+    80→use the sumcheck protocol to reduce the claim to a small number of scalar checks, so the heavy
+    81→lifting is in the interactive polynomial reduction rather than in an algebraic gadget. This is also
+    82→the approach taken by all existing lattice-based folding schemes5 including Latticefold [BC25a],
+    83→Latticefold+ [BC25b], Neo/SuperNeo [NS26], and Cyclo [GLLO26] for high-degree customizable
+    84→constraint systems (CCS).
+    85→ None of the above approaches is strictly better than the other. On the one hand, algebraic
+    86→schemes give very structured accumulators, are more succinct, and, in general, have cheaper per-
+    87→step verification (partially because the round-efficiency, with few random oracle calls), resulting
+    88→in smaller recursive overheads for IVC. On the other hand, sumcheck-based schemes enjoy linear
+    89→proving time in k for multi-folding (k ą 1).
+    90→
+    91→4
+    92→ In particular, for readability we are omitting families of folding schemes that do not rely on additively homomorphic
+    93→ commitments such as [BMNW25,BCFW25]
+    94→5
+    95→ Except for Lova [FKNP24], an algebraic folding scheme for the subset sum problem over the integers.
+    96→
+    97→ 2
+    98→1.1 Lattice-based Folding
+    99→
+   100→Due to their plausible post-quantum security and to the capacity of supporting smaller (64-bit)
+   101→fields natively, lattice-based folding schemes have seen lots of research activity in recent years.6
+   102→All existing lattice-based folding schemes for high-degree relations work over rings of the form
+   103→Rq “ Zq rXs{pΦq for a cyclotomic polynomial Φ “ X N ` 1 and follow the same high-level recipe:
+   104→
+   105→1. Depart from a high degree-d relation that can be captured by products of multilinear polyno-
+   106→ mials, such as CCS [STW23]. Define witnesses wi for these relations with low norm, that is,
+   107→ ||wi || ď B for some bound B.
+   108→2. Commit to the wi ’s to be folded using Ajtai commitments [Ajt96], which are additively homo-
+   109→ morphic and binding for low-norm committed vectors. Besides, use a range proof to show that
+   110→ the committed wi ’s satisfy the norm bound ||wi || ď B.
+   111→3. Reduce, via the sumcheck protocol, the initial degree-d relation to a series of evaluation claims
+   112→ about multilinear (i.e. degree-1) polynomials. These claims are generally captured as a linearized
+   113→ relation (e.g. Linearized CCS).
+   114→4. Decompose the witnesses in some basis b to control the norm growth induced by the folding as
+   115→ needed.
+   116→
+   117→ This elegant approach has been proven to be successful, but it is currently the only recipe
+   118→for building lattice-based folding schemes with practical performance and which are expressive
+   119→enough to capture high-degree relations. Besides, it presents two important limitations, which
+   120→seem very intrinsic to the reliance on sumchecks. First, the high-degree relation used needs to be
+   121→sumcheck-friendly. This prevents one from folding arbitrary transcripts determined by polynomial
+   122→constraints, such as in algebraic folding schemes [BC23,EG23], which are more versatile and enable
+   123→native folding of Plonkish and lookup relations without translation overheads. Second, sumcheck
+   124→leads to large transcripts, many random oracle calls (e.g. Latticefold+ reports around 100 RO
+   125→calls), and therefore a complex verifier circuit. When used in an IVC construction, all verifier
+   126→operations, including evaluations of hash functions, have to be encoded in the prover circuit, which
+   127→is a significant source of inefficiency.
+   128→ Considering the state-of-the art in the lattice-based folding schemes, our work addresses the
+   129→following question:
+   130→ Can we build a lattice-based algebraic folding scheme that:
+   131→ (i) is round–efficient,
+   132→ (ii) communication–efficient,
+   133→ (iii) expressive for high-degree relations,
+   134→ (iv) and supports an unbounded number of folding iterations?
+   135→
+   136→1.2 Our Contributions
+   137→
+   138→We introduce ProtogaLattice, a new algebraic folding paradigm for folding arbitrary polynomial
+   139→relations from lattice-based assumptions. Our new algebraic folding techniques offer small proofs,
+   140→6
+   141→ We remark that lattice-based folding techniques have also been applied to realize other families
+   142→ of constructions, such as SNARKs [BS23,KLNO24,KLNO25,NDC` 24,Che25,KLN` 26], polynomial commit-
+   143→ ments [AFLN24,CMNW24,NS24], and generally, range proofs.
+   144→
+   145→ 3
+   146→low verifier circuit complexity and the ability to capture general relations (arbitrary-degree polyno-
+   147→mial constraints) natively. These relations are defined by transcripts of special-sound protocols, like
+   148→in [BC23,EG23], as they efficiently capture R1CS, CCS, Plonkish or lookup arithmetizations. We
+   149→also present a novel method for norm-control, a witness bootstrapping protocol, that replaces the
+   150→witness decomposition needed in sumcheck folding schemes. Our bootstrapping tool can be used
+   151→complementary to our (bounded-norm) folding to unlock unbounded-depth folding composition for
+   152→IVC applications.
+   153→ Overall, our work displays a fresh, unexplored route towards building efficient lattice-based
+   154→folding, challenging the assumption that sumcheck-based techniques are the only viable approach.
+   155→Concretely, our contributions can be split into two main, independent protocols which we describe
+   156→below.
+   157→
+   158→A lattice-based folding scheme for polynomial relations. Our first and main result, which
+   159→we introduce in Section 5.2, is a folding protocol for arbitrary polynomial relations defined over the
+   160→ring Rq “ Zq rXs{pX N ` 1q for a power-of-two N . Our folding protocol is a reduction of knowledge
+   161→for relations Ξ acc ˆ pΞ fold qk Ñ Ξ acc . Here, Ξ acc is a relaxed relation for accumulators of bounded
+   162→norm, and Ξ fold is the relation for fresh witnesses of bounded norm.
+   163→ Our starting point is an attempt to carry out the techniques of algebraic folding schemes over
+   164→groups, such as Protogalaxy [EG23], to the ring setting. In Protogalaxy, k witnesses w1 , . . . , wk
+   165→are linearly combined into an accumulator w˚ using (univariate) Lagrange polynomials over a
+   166→domain H of size k. Soundness and completeness rely on algebraic relations modulo the vanishing
+   167→polynomial of H. Translating this to lattices, however, fails due to the norm expansion of the
+   168→accumulator w˚ that results from evaluating the Lagrange polynomials. In particular, when using
+   169→Ajtai commitments [Ajt96] where t “ Aw pmod qq is a homomorphic commitment to a small
+   170→ q for a public matrix A P R
+   171→w P Rm κˆm , the commitment is no longer binding for w with large
+   172→
+   173→norm. As a workaround, we combine witnesses using multivariate polynomials instead. For this
+   174→to work, we develop an analogous algebraic machinery using ideals over the ring Rq rX1 , . . . , Xk s
+   175→and the corresponding Gröbner basis theory. We provide a more detailed technical overview in
+   176→Section 5.1.
+   177→ This gives us a relaxed folding scheme where the commitments satisfy only a relaxed binding
+   178→property. For soundness to hold, our scheme requires the prover to provide a folding range proof
+   179→for the fresh input witnesses (not on the accumulator) as shown in Cyclo [GLLO26].
+   180→ We present our folding scheme as a modular framework composed by a relaxed folding pro-
+   181→tocol and a folding range proof, that we model as reductions of knowledge [KP23]. We further
+   182→instantiate our folding range proof by adapting the sumcheck-based ternary proof from Neo and
+   183→SuperNeo [NS26]. This framework admits a broad class of folding range proofs, so any future im-
+   184→provement on these schemes for lattices, such as an algebraic range proof with fewer rounds, could
+   185→be plugged in to reduce the verifier circuit of ProtogaLattice even further.
+   186→
+   187→Norm control via witness bootstrapping. Our folding scheme can be iterated multiple times
+   188→(we set parameters to support L “ 64 iterations), but eventually the norm of the accumulator grows
+   189→too large to continue folding. Our second result is a bootstrapping protocol for reducing the norm of
+   190→accumulators obtained from folding. This protocol can be used after many folding iterations, when
+   191→the norm reaches the upper bound, to reset the running accumulator before continuing with more
+   192→folding steps. Concretely, our bootstrapping protocol is a reduction of knowledge from ΞB acc Ñ Ξ acc ,
+   193→ 1 B
+   194→where the output norm bound B is smaller than the input norm bound B . 1
+   195→
+   196→ 4
+   197→Efficiency evaluation. We also adopt a concrete set of parameters and evaluate our scheme for
+   198→higher-degree relations and multiple instances to fold, for which we show the corresponding proof
+   199→sizes in Table 1. A detailed discussion of the performance and more estimates can be found in
+   200→Section 6.
+   201→
+   202→ Proof Size (KB)
+   203→ Witness Size
+   204→ degpf q “ 2 degpf q “ 5
+   205→ k“1 k“2 k“3 k“1 k“2 k“3
+   206→ 0.1 GiB („ 2 ) 30
+   207→ 8.13 14.44 25.36 8.88 27.09 110.86
+   208→ 1.0 GiB („ 2 ) 33
+   209→ 9.03 17.05 29.03 9.78 30.55 118.07
+   210→
+   211→Table 1. Concrete proof sizes of ProtogaLattice for a folding depth L “ 64 and k fresh instances to fold for a relation
+   212→defined by the polynomial-map f . We exclude the commitments and the instances and report only the proof, in line
+   213→with [NS26,GLLO26,Osa26]. See Table 5 for more data.
+   214→
+   215→1.3 Concrete Efficiency and Related Work
+   216→
+   217→In Table 2, we provide a comparison between ProtogaLattice and prior lattice-based folding schemes
+   218→for high-degree relations. We remark that while all these schemes support high-degree relations, they
+   219→all provide performance numbers for quadratic relations (e.g. R1CS). Hence, for a fair comparison
+   220→we also report efficiency numbers for folding one instance at a time for a degree-2 relation with
+   221→ProtogaLattice.
+   222→
+   223→ SuperNeo Latticefold+ Cyclo ProtogaLattice
+   224→ [NS26] [BC25a] [GLLO26] (This paper)
+   225→ Folded relation CCS/LCCS CCS/LCCS CCS/LCCS Polynomial rela-
+   226→ tions (incl. CCS)
+   227→ Techniques HyperNova style HyperNova style HyperNova style Multivariate
+   228→ sumcheck sumcheck sumcheck polynomial inter-
+   229→ polation
+   230→ Range proof Binary sumcheck Wider proof, uses Ternary sum- Ternary sumcheck
+   231→ proof ring monomials check proof proof
+   232→ Folding Depth 8 8 64 64
+   233→ bounded 8 with bootstrap
+   234→ Proof size „100 KB „100 KB 31.4 KB 6.52 KB
+   235→ (|witness| “ 227 )
+   236→ # Rounds ą60 „100 „60 „30
+   237→Table 2. Comparison table between ProtogaLattice and prior lattice-based folding schemes for high-degree relations.
+   238→We consider degree 2 relations (R1CS), witness size of total integer length 227 and only folding k “ 1 fresh instance
+   239→at each step.
+   240→
+   241→ 5
+   242→Concurrent work. PikkuFold [Osa26] advances the line of sumcheck-based folding schemes by inte-
+   243→grating optimizations—such as challenge rejection sampling—that are also applicable to our con-
+   244→struction. Its primary departure from prior work is its range proof module, which is designed to
+   245→minimize the prover-to-verifier communication. While`this range ˘ proof module could fit our frame-
+   246→work as well, it requires the verifier to operate on O λ log m bits of projection matrices, which
+   247→ 2
+   248→
+   249→we estimate is at least tens of megabytes in practice. While generating such large matrices can be
+   250→implemented very efficiently, the translation into constraints of such verifier circuit is presumably
+   251→complex and adds significant overheads in the iterative setting.
+   252→
+   253→1.4 Summary and Open Problems
+   254→Summary. In this work, we construct ProtogaLattice, a novel lattice-based folding scheme for high-
+   255→degree polynomial relations that is round and communication efficient and allows for unbounded
+   256→folding depth. ProtogaLattice supports folding k witnesses at a time (although efficiency degrades
+   257→significantly for large k), and works by iteratively folding and bootstrapping witnesses to reduce
+   258→their norm.
+   259→ Our construction can be seen as a constant-round folding backbone to which an efficient range-
+   260→proof mechanism can be attached, making it modular and flexible for instantiations. This represents
+   261→a significant step forward in the design of low-round folding schemes for general relations.
+   262→Open Problems. While ProtogaLattice shows a novel approach towards realizing efficient lattice-
+   263→based folding for expressive general relations, there are some open questions that we consider
+   264→interesting and leave as future work.
+   265→
+   266→1. Constant-Round Norm Check. ProtogaLattice provides a flexible constant-round folding module
+   267→ to which any range proof available in the literature can be attached. We instantiate it with a
+   268→ sumcheck-based range proof adapted from (Super)Neo [NS26]. To the best of our knowledge,
+   269→ succinct range proofs with succinct verification from the literature follow either a split-and-fold
+   270→ paradigm (RoK and Roll [KLNO25], RoK Paper SISsors [KLNO24]) or rely on the sum-check
+   271→ protocol (LatticeFold+ [BC25b], SALSAA [KLOT25], RoKoko [KLN` 26]). All aforementioned
+   272→ range proofs have a logarithmic number of rounds. Therefore, instantiations using one of these
+   273→ schemes do not allow to fully realize the constant-round potential of the ProtogaLattice folding
+   274→ backbone. We leave as an interesting open question the design of a constant-round range proof
+   275→ that exploits the structure of ProtogaLattice.
+   276→2. Zero-Knowledge. Depending on the context in which Protogalattice is used, it may be useful to
+   277→ have a zero-knowledge variant of the scheme, or to study whether the scheme (or a modification
+   278→ of it) satisfies the randomizing property introduced in [KS24] for the purpose of building zero-
+   279→ knowledge IVC.
+   280→
+   281→2 Preliminaries
+   282→
+   283→2.1 Notation
+   284→We denote by N the set of natural numbers ě 0. We denote the security parameter by λ P N. We
+   285→call a function  negligible, denoted pλq “ neglpλq, if pλq “ Opλ´c q for every constant c ą 0, and
+   286→call a function ppλq polynomial, denoted polypλq, if ppλq “ Opλc q for some constant c ą 0. We say
+   287→that an algorithm is probabilistic polynomial time (PPT) if it consumes randomness and its running
+   288→
+   289→ 6
+   290→time is bounded by some ppλq “ polypλq. For a finite set S, x Ð$ S denotes sampling x uniformly
+   291→at random in S. For an algorithm A, we write y Ð Apxq for the output of A on input x. For two
+   292→positive n, m P N, rn, ms is the set tn, n ` 1, . . . , mu, and rns is the set r1, ns. We denote vectors
+   293→and matrices using bold fonts. For a vector x, xi denotes its i-th component, and for a matrix M,
+   294→Mi,j denotes its pi, jq-th entry. We write 0k and 1k for the vectors of k zeros and ones respectively.
+   295→We also write 0kˆk and Ikˆk for the zero matrices and the identity matrices of dimension k ˆ k
+   296→respectively. Given two strings x, y, we denote their concatenation by x|y. We use the notation Ξ
+   297→to denote an efficiently decidable binary relation. For pairs px, wq P Ξ we call x the statement and
+   298→w the witness. We write Ξ “ tpx; wq : ppx, wqu to describe an NP relation. For ease in notation,
+   299→we sometimes include the statement x as a part of the witness and omit it, i.e. Ξ “ tw : ppwqu.
+   300→We denote the infinity norm simply by the operator || ¨ || “ || ¨ ||8 .
+   301→
+   302→2.2 Reductions of Knowledge
+   303→We review the reductions of knowledge framework [KP23]. We adapt the definition from prior
+   304→works [NS26,KLNO24] and, as is necessary in the lattice setting, decouple the relations used for
+   305→completeness from those used for soundness (extraction).
+   306→Definition 1 (Reduction of Knowledge). Let Ξ1 , Ξ2 be relations, called the folding relations,
+   307→and let Ξ11 , Ξ21 be relations, called the extraction relations, satisfying Ξi Ď Ξi1 for i P t1, 2u. A
+   308→reduction of knowledge from Ξ1 Ñ Ξ2 in the completeness direction and Ξ11 Ð Ξ21 in the soundness
+   309→direction is a tuple of three PPT algorithms pG, P, Vq defined as follows:
+   310→– Gp1λ , 1` q Ñ p: Takes a security parameter 1λ and a size bound 1` and outputs public parameters
+   311→ p, which we assume are input to all algorithms.
+   312→– Ppt1 , w1 q Ñ pt2 , w2 q: Takes as input an instance-witness pair pt1 , w1 q and interactively reduces
+   313→ the task of checking pt1 , w1 q P Ξ1 to the task of checking pt2 , w2 q P Ξ2 , or returns K.
+   314→– Vpp, t1 q Ñ t2 : Takes as input an instance t1 and interactively reduces the task of checking t1 to
+   315→ the task of checking a new instance t2 .
+   316→ We write xP, Vypt1 , w1 q Ñ pt2 , w2 q to denote the interaction between P, V. The reduction must
+   317→satisfy the following properties:
+   318→Completeness. For any admissible set of parameters λ, ` P N, given p Ð Gp1λ , 1` q and pt1 , w1 q Ð
+   319→ Appq such that pt1 , w1 q P Ξ1 , the prover’s output instance must be equal to the verifier’s output
+   320→ instance t2 , and PrrxP, Vypt1 , w1 q P Ξ2 s “ 1.
+   321→Knowledge soundness. For any expected PPTadversary A, there exists an expected poly-time
+   322→ extractor E with rewinding access to A such that if
+   323→ ˇ
+   324→ ˇ p Ð Gp1λ , 1` q
+   325→ » fi
+   326→ ˇ 1
+   327→ pAq :“ Pr–pt2 , w2 q P Ξ21 ˇˇ t1 Ð Appq fl ě ,
+   328→ ˇ pt2 , w2 q Ð xA, Vypt1 q polypλq
+   329→
+   330→ then ˇ
+   331→ ˇ p Ð Gp1λ , 1` q
+   332→ » fi
+   333→ ˇ
+   334→ Pr–pt1 , w1 q P Ξ11 ˇˇ t1 Ð Appq fl ě pAq ´ neglpλq.
+   335→ ˇ w1 Ð E A pp, t1 q
+   336→Public coin. All verifier messages are bounded-length random messages, and the verifier does not
+   337→ use any other random coins.
+   338→
+   339→ 7
+   340→2.3 Cyclotomic rings
+   341→
+   342→Let N P N be a power of two. We denote by R :“ ZrXs{xX N ` 1y the power-of-two cyclotomic ring
+   343→of dimension N . Let q ą 2 be a prime and denote by Rq :“ R{qR “ Zq rXs{xX N ` 1y where we
+   344→represent Zq :“ t´tq{2u, . . . , tq{2uu. If q ” 1 ` 2d1 pmod 4d1 q for some d1 | N , it is well-known that
+   345→Rq – FdqN {d1 via the Number Theoretic Transform (NTT).
+   346→ 1
+   347→
+   348→ For f “ iPrN s fi X i P Rq , we use cfpf q :“ pf0 , . . . , fN ´1 q P ZN q to denote the coefficient
+   349→ ř
+   350→vector of f , and ctpf q :“ f0 is the constant term of f . For a vector f P Rnq , we denote by
+   351→cfpf q :“ pcfpf0 qJ , . . . , cfpfn´1 qJ q P ZnˆN
+   352→ q the concatenation of the transposed coefficient vectors,
+   353→and ctpf q “ pctpf0 q, . . . , ctpfn´1 qq P Znq is the first column of cfpf q.
+   354→
+   355→2.4 Sampling Sets
+   356→
+   357→Definition 2 (Sampling sets, [CCKP19]). For an arbitrary ring R, a subset C of R is a
+   358→sampling set if the difference of any two distinct elements in C is not a zero divisor. C is further
+   359→a strong sampling set if the difference is also invertible.
+   360→
+   361→Example: For R :“ Rq where q is a prime, Zq Ď Rq is a strong sampling set as the difference of
+   362→any two distinct elements in this set is invertible in Rq .
+   363→
+   364→Expansion Factor. To ensure that homomorphic commitments remain binding, we need a strong
+   365→sampling set Csmall Ď Rq such that for every c P Csmall and any v̂ P R, the norm of cv̂ will not
+   366→increase much compared to }v̂}8 . To quantify this property, we define the expansion factor of
+   367→Csmall Ď Rq as
+   368→ }c ˆ v̂}8
+   369→ }Csmall }op :“ sup . (1)
+   370→ cPCsmall ,v̂PR }v̂}8
+   371→
+   372→Lemma 1 (Generalized Schwartz-Zippel [BCPS18]). Consider a k-variate nonzero poly-
+   373→nomial f P Rďd rX1 , . . . , Xk s over a ring R with per-variable degree at most d. Let C Ď R be a
+   374→sampling set.
+   375→ Then we have PrrÐ$C k rf prq “ 0s ď |C| dk
+   376→ .
+   377→
+   378→Lemma 2 (Lyubashevsky–Seiler, power-of-two case). Let N and d1 be powers of two with
+   379→1 ă d1 ď N , and let q be a prime satisfying q “ 1 ` 2d1 mod 4d1 . Then in the ring Rq “
+   380→Zq rXs{pX N ` 1q we have the factorization
+   381→
+   382→ d 1
+   383→ ź 1
+   384→ N
+   385→ X `1“ pX N {d ´ ri q pmod qq,
+   386→ i“1
+   387→
+   388→for distinct ri P Fˆ
+   389→ q , so that each X
+   390→ N {d ´ r is irreducible mod q.
+   391→ 1
+   392→ i
+   393→ 1{d1
+   394→ Moreover, any non-zero ypXq “ i“0 yi X i P R is invertible in Rq if either }y}8 ă q? 1 or }y}2 ă
+   395→ řN ´1
+   396→ d
+   397→ 1
+   398→q 1{d .
+   399→
+   400→ 8
+   401→2.5 Module SIS
+   402→We recall the Module Short Integer Solution (MSIS) problem defined in [LS15,PR06,LM06,ACK21].
+   403→We will focus on the `8 -norm.
+   404→
+   405→Definition 3 (Module SIS with `8 -norms [ACK21]). Let R :“ ZrXs{pX N ` 1q and Rq :“
+   406→R{qR. On input A Ð$ Rκˆm
+   407→ q , the goal of the MSIS8,q
+   408→ κ,m,B problem is to find a non-zero x P R such
+   409→ m
+   410→
+   411→that }x}8 ď B and Ax “ 0 over Rq .
+   412→
+   413→ With the right choice of parameters, we can obtain a MSIS8,q
+   414→ κ,m,B problem with 128 bits of security
+   415→[ESS` 19].
+   416→
+   417→2.6 Ajtai Commitments
+   418→Let R :“ ZrXs{pX N ` 1q and Rq :“ R{qR where q P N is a prime. The commitment CMκ,m,B
+   419→introduced by [Ajt96] works as follows:
+   420→
+   421→– KeyGenCompκ, mq Ñ A: sample a random matrix A Ð$ Rκˆm
+   422→ q .
+   423→– CompA, xq Ñ cm: given x P R as input, where }x}8 ď B, and no randomness, output cmpxq :“
+   424→ m
+   425→
+   426→ Ax mod q P Rκq .
+   427→
+   428→ Assuming that the MSIS problem MSIS8,q κ,m,2B is hard it follows that CMκ,m,B satisfies the
+   429→binding property for inputs }x}8 ď B: Any adversary that can open a commitment cm to two
+   430→different openings x1 , x2 (with `8 -norm less than B), computes x1 ´ x2 ‰ 0 which is a solution to
+   431→the MSIS8,q
+   432→ κ,m,2B problem where }x1 ´ x2 }8 ă 2B.
+   433→ In our results, to argue knowledge soundness of the folding schemes based on Ajtai commitments,
+   434→we need the commitments to satisfy a relaxed binding property as defined in [ACK21,ALS20].
+   435→
+   436→2.7 Relaxed Binding Commitment
+   437→Let C Ă Rq be a strong sampling set with expansion factor T . We say that the pair p∆, xq P
+   438→pC ´ Cq ˆ Rm is a B-weak opening of cm if ∆ ¨ cm “ Ax mod q and }x}8 ď B. Informally, a
+   439→commitment is B-relaxed binding if it is infeasible to find two different B-weak openings for
+   440→the same commitment. The Ajtai commitment is B-relaxed binding if MSIS8,q κ,m,4T B is hard: an
+   441→adversary that outputs two B-weak openings p∆1 , x1 q, p∆2 , x2 q for the same commitment such that
+   442→∆1 x2 ‰ ∆2 x1 breaks the MSIS8,q
+   443→ κ,m,4T B .
+   444→
+   445→3 Warm-up: Algebraic Folding and Protogalaxy
+   446→
+   447→Before getting into technicalities and the description of ProtogaLattice, we provide some intuition
+   448→by presenting Protogalaxy, the (classical) algebraic folding scheme that served us as a starting point.
+   449→We also introduce some notations that will be useful later. Protogalaxy [EG23] is a folding scheme
+   450→which supports general polynomial relations.7 In a nutshell, it can fold k witnesses w1 , . . . , wk that
+   451→ 7
+   452→ Protogalaxy actually supports folding of transcripts of special-sound protocols, and so does our scheme ProtogaLat-
+   453→ tice. For simplicity, here we introduce Protogalaxy for the case when special-sound protocol transcripts have only
+   454→ one message, such as when folding vanilla R1CS or CCS. We refer to Definition 14 and Section B.1 for details—the
+   455→ extension is fairly straightforward.
+   456→
+   457→ 9
+   458→satisfy a base polynomial relation defined by
+   459→ ! ˇ )
+   460→ Ξ :“ pt, wq ˇ t “ Compwq ^ f pwq “ 0n . (2)
+   461→ ˇ
+   462→
+   463→for some polynomial map f “ pf1 , . . . , fn q : Fm Ñ Fn of degree d defined over a finite field F,
+   464→and an additively homomorphic commitment scheme Comp¨q. Such witnesses are combined with an
+   465→initial accumulator w0 into a fresh accumulator w˚ . Given w0 and then w1 , . . . , wk , the folding
+   466→scheme works by defining a polynomial
+   467→ ÿ
+   468→ W pXq “ L0 pXqw0 ` Li pXqwi
+   469→ iPrks
+   470→
+   471→where L0 pXq, . . . , Lk pXq are a basis of Lagrange polynomials over some domain H of size k ` 1.
+   472→Then, given a random challenge γ P F sent by the verifier, the prover sets w˚ “ W pγq as the
+   473→new accumulator. This strategy minimizes the number of rounds of interaction between prover and
+   474→verifier, which, when compiled via Fiat-Shamir, results into fewer random oracle calls and smaller
+   475→verifier circuits.
+   476→ For both completeness and soundness, the scheme critically relies on the fact that Lagrange
+   477→polynomials behave as linear functions modulo ZpXq “ aPH pX ´ aq, the vanishing polynomial
+   478→ ś
+   479→over H. In short, this enables the prover to provide a quotient of f pW pXqq, which the verifier
+   480→can validate via a linear check. We state the linearity lemma from [EG23, Lemma 4.2], which we
+   481→formulate for arbitrary domains:
+   482→
+   483→Lemma 3. Let f : Fm Ñ F be a polynomial map and w1 , . . . , wk P Fm vectors. Let pLi qiPrks be the
+   484→Lagrange basis over a domain H of size k and ZpXq the vanishing polynomial of H. Then, we have
+   485→that ˜ ¸
+   486→ k
+   487→ ÿ ÿk
+   488→ f Li pXqwi “ Li pXqf pwi q mod ZpXq
+   489→ i“1 i“1
+   490→ ´ř ¯
+   491→Proof. It suffices to show that ZpXq divides the polynomial given by HpXq “ f k
+   492→ i“1 L i pXqwi ´
+   493→
+   494→ i“1 Li pXqf pwi q. To see this, note that given any j P rks, and taking aj P H, we have that
+   495→řk
+   496→Lj paj q “ 1 and Li paj q “ 0 for any i P rks, i ‰ j. Therefore,
+   497→ ˜ ¸
+   498→ k
+   499→ ÿ ÿk
+   500→ Hpaj q “ f Li paj qwi ´ Li paj qf pwi q
+   501→ i“1 i“1
+   502→ “ f pLj paj qwj q ´ Lj paj qf pwj q “ 0
+   503→
+   504→As Hpaj q “ 0 for every j P rks, then ZpXq divides HpXq as claimed. [
+   505→ \
+   506→
+   507→Accumulators. The relation satisfied by the accumulator is Ξrand , a relaxed relation. The lat-
+   508→ter are customary in folding schemes, such as e.g. Relaxed R1CS [KST22,NBS23] or Linearized
+   509→CCS [KS24,BC25a,NS26], but Protogalaxy has the peculiarity that accumulator relations are also
+   510→high-degree relations. As opposed to witnesses, for which f pwq “ 0n , accumulators evaluate to a
+   511→non-zero vector under f .
+   512→ Formally, Protogalaxy can be stated as a reduction of knowledge Ξrand ˆ Ξ k Ñ Ξrand . We
+   513→introduce the accumulator relation below.
+   514→
+   515→ 10
+   516→Definition 4 (Structured randomized relation). The generalized randomized relation Ξrand
+   517→is the subset Ξrand Ď pC ˆ Ft ˆ Fq ˆ Fm s.t.
+   518→ n
+   519→ !` ˘ ˇˇ ÿ )
+   520→ Ξrand :“ pt, β, eq, w ˇ t “ Compwq ^ powi pβqfi pwq “ e
+   521→ i“1
+   522→
+   523→where the polynomials powi pβq :“ i“1 p1, βi q expand a seed β P F of length t “ rlog ns.
+   524→ Ât t
+   525→
+   526→ Note that this relation compresses the “rows” of f pwq using a vector of randomizers β P Ft . To
+   527→prevent the vector β from having size n, which would result in a linear-time verifier, Protogalaxy re-
+   528→lies on the power monomials function powi . This is a form of compressing β into a vector of size log n
+   529→which still enables efficient re-randomization. In ProtogaLattice, we use the same randomization
+   530→structure, except over ring elements.
+   531→ For completeness, we include the full protocol description from [EG23] in Section B.
+   532→
+   533→4 Relations, Architecture and Range Proofs
+   534→
+   535→In this section, we present the relations and architecture of our folding scheme. The architecture’s
+   536→formal description is presented at the end of the section in Figure 1. The folding backbone presented
+   537→in Section 5 only allows the extractor to recover relaxed openings, thus we formally introduce the
+   538→definition of Relaxed Folding Scheme (Definition 8). In Section 4.3 we define the Folding Range
+   539→Proof module that is needed to make ProtogaLattice a tight folding scheme.
+   540→
+   541→4.1 Relations
+   542→
+   543→The two relations in Definition 5 below are the relations supported by ProtogaLattice. From a
+   544→high-level, Ξf,n,B is the base relation (i.e., the relation satisfied by fresh witnesses) and Ξf,n,B
+   545→ acc is
+   546→the accumulator relation, both restricted to Ajtai commitments over modules.
+   547→
+   548→Definition 5. Let q be a prime, Rq be a cyclotomic ring, κ, n, m, B be integers. Let A P Rκˆm q
+   549→be an Ajtai commitment key and f : Rm q Þ
+   550→ Ý Ñ R n be a polynomial map such that f p0 q “ 0 . We
+   551→ q m n
+   552→define the input relation for the fresh witnesses as follows:
+   553→ # +
+   554→ Aw “ t mod q, }w} ď B,
+   555→ x “ t P Rκq ; w P Rm
+   556→ ` ˘
+   557→ Ξf,n,B :“ q :
+   558→ f pwq “ 0n
+   559→
+   560→And the relation for the accumulator as follows:
+   561→ $ ,
+   562→ ’
+   563→ ’ Aw “ t mod q, /
+   564→ /
+   565→ ’ /
+   566→ }w} ď B
+   567→ ’
+   568→ &` /
+   569→ .
+   570→ acc
+   571→ x “ pt, β, eq P Rκ`log n`1
+   572→ ; w P Rm
+   573→ ˘
+   574→ Ξf,n,B :“ q q : n .
+   575→ ’ ÿ /
+   576→ powi pβqfi pwq “ e/
+   577→ ’
+   578→ ’ /
+   579→ /
+   580→ ’
+   581→ % -
+   582→ i“1
+   583→
+   584→where powi pβq are as in Definition 4.
+   585→ We omit the public parameters q, κ, m, p in the subscripts for the sake of readability.
+   586→
+   587→ 11
+   588→ While the relations Ξf,n,B and Ξf,n,B
+   589→ acc are our target statements, the extractors of our folding and
+   590→
+   591→bootstrapping backbones only recover a relaxed opening to the input commitments. More precisely,
+   592→for an input commitment-witness pair pt, wq in Ξf,n,B or Ξf,n,B
+   593→ acc , both extractors output a witness w
+   594→
+   595→satisfying Aw “ t pmod qq, but w itself is of arbitrarily large norm. Rather, our extractor outputs
+   596→a small factor s P Rq with bounded operator norm such that }sw} ď B. Definition 6 captures the
+   597→notion of weak opening for both fresh instances and accumulators.
+   598→
+   599→Expressing usual constraint systems. The notation t “ Aw and f pwq “ 0n expresses usual con-
+   600→straint systems such as R1CS and CCS without assuming any structure on them. As an example,
+   601→we illustrate how R1CS translates to our relations. Let w “ px, win , 1q P Fm be a R1CS ex-
+   602→tended witness such that Aw ˝ Bw ´ Cw “ 0n for matrices A, B, C P Fnˆm . Then, we can
+   603→express such a R1CS relation in our constraint system by simply denoting t “ cmpwq and letting
+   604→fi pwq “ aTi w ¨ bTi w ´ cTi w for each i P rns, which is a degree-2 polynomial map.
+   605→ We remark that the notation t “ Aw is actually a simplification, as we can actually fold
+   606→transcripts of (committed) special-sound protocol transcripts as described in Protostar [BC23].
+   607→For these, we can fold committed transcripts pt0 , c1 , t1 , . . . , cµ , tµ q, where ti “ Awi and wi are
+   608→the original prover messages. The advantage of these is that they additionally support complex
+   609→Plonkish-like arithmetizations with lookups and range checks expressed in more rounds. We provide
+   610→extensive details in the Supplementary Material A.2.
+   611→
+   612→Supporting field-native relations. ProtogaLattice is native to constraints expressed directly over the
+   613→ring Rq , as the polynomial map f is defined over Rq . If the constraints are natively expressed over
+   614→the field Fq instead, one needs to embed Fq constraints and witnesses into an equivalent formulation
+   615→over rings. The naïve approach is to embed each Fq element as a single Rq element. This is valid
+   616→but somewhat wasteful (Rq elements are much larger than Fq elements), so Latticefold [BC25a]
+   617→instead embeds vectors a P Fdq into a single Rq element using the slots of the NTT transform. Pro-
+   618→togaLattice is fully compatible with this approach. Other lattice-based folding schemes, including
+   619→SuperNeo [NS26] and Cyclo [GLLO26], use a clever embedding technique that enables them to run
+   620→the sumcheck prover over the field instead of over the ring. ProtogaLattice can be adapted to sup-
+   621→port this embedding, at the cost of an additional reduction of knowledge as done in Cyclo [GLLO26,
+   622→Section 2.6]. However, since ProtogaLattice does not run the sumcheck protocol, whether such an
+   623→approach is beneficial for ProtogaLattice is unclear.
+   624→
+   625→4.2 Architecture of ProtogaLattice
+   626→
+   627→The architecture of our folding scheme (Figure 1) requires the fresh witnesses to go through a
+   628→folding range proof (Definition 7) to allow the extractor to recover the original witnesses from the
+   629→extracted relaxed openings of the folding and bootstrapping modules.
+   630→ Informally, folding range proofs (Definition 7) relax the norm constraint }w} ď B to a norm
+   631→constraint on a small multiple of the witness }sw} ď B at the cost of extra polynomial constraints.
+   632→Notably, we require that there exists an extractor that finds the original w satisfying the tight
+   633→norm constraint }w} ď B given relaxed openings pw, sq for an }s}op ď % where % ą 1.
+   634→ The output relation of folding range proofs may include extra information in the instance, which
+   635→we attach as xRP to the instance of our relations Ξf,n,B,%
+   636→ fold and Ξf,n,B,%
+   637→ acc .
+   638→
+   639→ 12
+   640→Definition 6. We use the notations of Definition 5 and let nRP , mRP be integers, % ě 1 and
+   641→fRP : Rm RP ÞÝÑ RnRP be a polynomial map. We define the two following relaxed relations for fresh
+   642→ q q
+   643→witnesses (Ξf,n,B,%
+   644→ fold ) and for accumulators (Ξf,n,B,%
+   645→ acc ):
+   646→
+   647→ fold acc
+   648→ Ξf,n,B,% :“ Ξf,n,B,% :“
+   649→ $´ ` ˘ ¯ , $´ ` ˘ ¯ ,
+   650→ ’
+   651→ ’
+   652→ ’ x “ t, x RP ; pw, sq :/
+   653→ /
+   654→ /
+   655→ ’
+   656→ ’
+   657→ ’ x “ t, x RP , β, e ; pw, sq : /
+   658→ /
+   659→ /
+   660→ ’ / ’ /
+   661→ κ m κ mRP
+   662→ R R t P Rq , xRP P Rq ,
+   663→ ’ /
+   664→ t , x RP
+   665→ ,
+   666→ ’ /
+   667→ ’
+   668→ ’
+   669→ ’ P q RP P q
+   670→ /
+   671→ /
+   672→ /
+   673→ ’
+   674→ ’
+   675→ ’
+   676→ /
+   677→ /
+   678→ /
+   679→ m
+   680→ ’ /
+   681→ β P Rtq , e P Rq ,
+   682→ ’ /
+   683→ w R , s R ,
+   684→ ’ /
+   685→ ’
+   686→ ’
+   687→ ’
+   688→ & P q P q
+   689→ /
+   690→ /
+   691→ /
+   692→ .
+   693→ ’
+   694→ ’
+   695→ ’
+   696→ /
+   697→ /
+   698→ /
+   699→ &w P R m
+   700→ ’ /
+
+[showing lines 1-700 of 2665; use offset=701 with limit to continue reading]

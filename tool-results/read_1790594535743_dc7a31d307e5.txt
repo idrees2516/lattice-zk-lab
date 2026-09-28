@@ -1,0 +1,502 @@
+     1→Cyclo: Lightweight Lattice-based Folding via Partial Range Checks
+     2→
+     3→ Albert Garreta1 , Helger Lipmaa2 , Urmas Luhaäär2 , and Michal Osadnik3
+     4→ 1
+     5→ Nethermind Research albert@nethermind.io
+     6→ 2
+     7→ University of Tartu, Estonia {helger.lipmaa,urx}@ut.ee
+     8→ 3
+     9→ Aalto University, Finland michal.osadnik@aalto.fi
+    10→
+    11→ Abstract. Folding is a powerful technique for constructing efficient succinct proof systems, especially
+    12→ for computations that are expressed in a streaming fashion. In this work, we present Cyclo, a new lattice-
+    13→ based folding protocol that improves upon LatticeFold+ [Boneh and Chen ’25] in multiple dimensions
+    14→ and which incorporates, among others, the pay-per-bit techniques from Neo when folding constraints
+    15→ expressed over a field Fq [Nguyen and Setty ’25]. Cyclo proposes a new framework for building lattice-
+    16→ based folding schemes that eliminates the need for norm checks on the accumulator by adopting an
+    17→ amortized norm-refreshing design, ensuring that the witness norm grows additively per round within a
+    18→ (generously) bounded number of folds. This design simplifies the protocol and reduces prover overhead.
+    19→ In particular, Cyclo only performs range checks on the input non-accumulated witness, and when ap-
+    20→ plied to fold constraints over Fq , it does not decompose any witnesses into low-norm chunks within the
+    21→ folding protocol itself. Cyclo, supporting a complete family of cyclotomic rings, combines two simple
+    22→ building blocks: an extension commitment that reduces the norm of the witness by decomposing it and
+    23→ recommitting, and an ℓ∞ range test via a sum-check protocol. We demonstrate, by proving communi-
+    24→ cation and runtime estimates that the construction results in an efficient and proof-size-friendly folding
+    25→ scheme. We also establish an algebraic connection between Rq and Fq using the polynomial evaluation
+    26→ map, enabling efficient reduction from R1CS/CCS over Fq to a linear relation over Rq , providing a new
+    27→ and simpler formulation of the techniques in [Nguyen and Setty ’25]. In practical settings, Cyclo achieves
+    28→ succinct proof sizes on the order of 30 KB, improving by an order of magnitude over LatticeFold+. Our
+    29→ efficiency benchmarks indicate that our protocol also outperforms LatticeFold+ in practice.
+    30→
+    31→Table of Contents
+    32→
+    33→1 Introduction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+    34→ 1.1 Our contributions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+    35→2 Technical Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+    36→ 2.1 LatticeFold(+) Framework for Folding Linear Relations . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+    37→ 2.2 New Framework: Amortized Norm-Refreshing Folding Scheme . . . . . . . . . . . . . . . . . . . . 8
+    38→ 2.3 Building Blocks of Cyclo . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+    39→ 2.4 Cyclo: Putting the Building Blocks Together . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+    40→ 2.5 Norm growth: completeness and soundness . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+    41→ 2.6 From R1CS over Fq to the Principal Linear Relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+    42→ 2.7 Concrete Efficiency of the Folding Scheme . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+    43→3 Preliminaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+    44→4 Range Test . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+    45→5 Extension Commitment . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+    46→6 Folding Scheme: Cyclo . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+    47→ 6.1 Parameters Selection and Efficiency Estimates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+    48→7 R1CS/CCS over Fq to the principal linear relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+    49→ 7.1 A low-norm, bit-size preserving encoding of Fq in Rq via module homomorphic
+    50→ preimages . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+    51→2 Albert Garreta, Helger Lipmaa, Urmas Luhaäär, and Michal Osadnik
+    52→
+    53→ 7.2 Reduction to the committed hybrid R1CS relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+    54→ 7.3 Reduction to the principal linear relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+    55→A Extended Preliminaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+    56→ A.1 Variants of Principal Linear Relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+    57→ A.2 SIS-break Relation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 33
+    58→ A.3 Reduction of Knowledge . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 33
+    59→B Instantiation of Strong Sampling Set . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+    60→ B.1 Exact Strong Sampling Set . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+    61→ B.2 Approximate Strong Sampling Set . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 35
+    62→C Parameters Selection and Practical Evaluation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36
+    63→ C.1 Communication . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37
+    64→ C.2 Benchmark of the Extension Commitment and Comparison with Double
+    65→ Commitment from [BC25b] . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38
+    66→ C.3 On the efficiency of Sum-check . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39
+    67→ C.4 Memory usage . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40
+    68→
+    69→1 Introduction
+    70→
+    71→In recent years, succinct non-interactive arguments of knowledge (SNARKs) have become central
+    72→to applications such as blockchains [XZC+ 22,GKO24,LM25,LZW+ 25], privacy-preserving authen-
+    73→tication [EHRS24], and verifiable computation [ACGS24,CCC+ 25]. Despite their power, SNARKs
+    74→suffer from a major memory bottleneck that limits their applicability[LZW+ 24,ZSCZ25]: the prover
+    75→must load the entire computation into memory. This is infeasible for large computations and, more
+    76→broadly, fails to capture how computations are often carried out in practice, namely in a streaming
+    77→manner.
+    78→ This setting, motivated in particular by practical applications such as blockchains and verifi-
+    79→able outsourced computation (e.g., cloud/edge ML inference and long-running services), has led
+    80→to the framework of incrementally verifiable computation (IVC) [Val08,NPR19] and its generaliza-
+    81→tion, proof-carrying data [CT10,BCL+ 21,BDFG21,CCG+ 23]. Early IVC protocols were built from
+    82→SNARKs and can be viewed as producing, at each step, a proof for the computation performed
+    83→by the verifier in the previous step [Val08,BCCT12,BCTV14]. More modern approaches use folding
+    84→schemes [BGH19,BDFG21,BCL+ 21,BC25a,BC25b], which let the prover aggregate many compu-
+    85→tation steps into a single instance of an accumulator relation. This is substantially simpler than
+    86→proving the entire computation at each step and yields improved efficiency.
+    87→ Folding can be understood via reductions of knowledge [ACK21,KP22]. A reduction of knowledge
+    88→from a relation Ξ0 to a relation Ξ1 is a protocol Π between a prover and a verifier in which the
+    89→ x
+    90→verifier, given an instance 0 for Ξ0 , interacts with the prover and ultimately outputs an instance
+    91→x 1 for Ξ1 . The key property is that if the prover can provide a witness 1 for 1 , then one can w x
+    92→ w x
+    93→extract a witness 0 for 0 from the prover. A folding scheme realizes a reduction of knowledge
+    94→from the product relation Ξacc × Ξ0 to the accumulation relation Ξacc : it folds a pair of instances
+    95→ x x x
+    96→( acc , 0 ) into a single new instance ′acc of Ξacc . Repeating this reduction lets the prover aggregate
+    97→many computation steps (expressed by Ξ0 ) into a single instance of the accumulator relation Ξacc .
+    98→This intuition also extends naturally to multiple-input relations, allowing folding with inputs from
+    99→Ξacc × (Ξ0 × · · · × Ξd−1 ).
+   100→ The best-established folding schemes rely on linearly homomorphic commitments, such as Ped-
+   101→ersen commitments [Ped92], to commit to the witness of the input relation. Folding then amounts
+   102→ Cyclo: Lightweight Lattice-based Folding via Partial Range Checks 3
+   103→
+   104→to combining the per-step commitments into a single commitment to the folded instance. Unfortu-
+   105→nately, Pedersen relies on the discrete logarithm assumption and is therefore vulnerable to quantum
+   106→attacks [Sho94]. A compelling alternative is the Ajtai commitment [Ajt96], which is based on the
+   107→hardness of lattice problems and is widely viewed as post-quantum secure; we discuss lattice-based
+   108→folding schemes below. Another line of work builds folding schemes from hash-based commitments
+   109→and error-correcting codes [BMNW25a,BCFW25,BMNW25b].
+   110→Lattice-based folding schemes. A major recent advance is the development of lattice-based fold-
+   111→ing schemes, including Lova [FKNP24], LatticeFold [BC25a], LatticeFold+ [BC25b], and Neo [NS25].
+   112→These schemes replace Pedersen commitments with plausibly quantum-secure Ajtai commitments,
+   113→yielding plausible post-quantum security. However, translating Pedersen-based folding to the lat-
+   114→tice setting is not straightforward: Ajtai commitments critically depend on the committed message
+   115→being short, i.e., the witness having low norm. This shortness constraint creates difficulties because
+   116→the witness norm typically grows with each folding step. Moreover, norm growth arises not only
+   117→in folding (the “correctness direction”), but also in extraction (the “extraction direction”), when
+   118→recovering a witness for the input relation from a witness for the folded relation. This growth com-
+   119→plicates the soundness analysis, since one must ensure that the witness norm stays within acceptable
+   120→bounds throughout folding.
+   121→ To address the norm growth issues, prior lattice-based folding schemes combine two general
+   122→techniques, which are afterward instantiated differently in each folding scheme:
+   123→
+   124→ – Decomposition. Given a witness vector of norm at most B, this procedure decomposes it into
+   125→ chunks of smaller norm b. The chunks are later randomly combined using low-norm verifier
+   126→ challenges so that the resulting linear combination has norm at most B. This step is needed for
+   127→ completeness, i.e., to ensure the accumulated output witness remains low-norm.
+   128→ – Range-check. These are variants of range proofs that certify a witness vector satisfies a prescribed
+   129→ bound. This step is needed for soundness, ensuring that extractors output low-norm witness
+   130→ vectors.
+   131→Under this lens, LatticeFold and LatticeFold+ exhibit the following cost profiles. LatticeFold uses
+   132→grand-product-sum-based range-checks for very small bounds (e.g., b = 2). A single such range
+   133→check, as we show in this work, is efficient. However, during decomposition, LatticeFold splits each
+   134→input witness into k low-norm chunks, commits to them, and then applies a sum-check-based range-
+   135→check to each chunk (the sum-checks are batched, but prover time still grows linearly in 2k); hence
+   136→the overall combined procedure is relatively expensive, cf. [Res24]. In contrast, LatticeFold+ uses a
+   137→very lightweight decomposition step (it decomposes into only 2 vectors).
+   138→ The most efficient instantiations of lattice-based primitives use cyclotomic rings of the form
+   139→R = Z[X]/⟨Φf (X)⟩, where Φf (X) is the f-th cyclotomic polynomial. Over R, the LatticeFold+ range-
+   140→check (which computes so-called double-commitments) is relatively costly: it requires computing at
+   141→least φ (the ring degree) “single” Ajtai commitments and then re-committing to them. A cheap
+   142→grand-product sum-check-based range-check is unavailable here because the verified norm bound B
+   143→is not small enough. Other norm checks (tailored to the ℓ2 -norm) have been used in lattice-based
+   144→argument systems [BS23,KLNO24,KLNO25b] and transfer almost directly to the folding setting.
+   145→Lattice-based folding schemes for constraints expressed over finite fields. The ring R
+   146→admits a natural embedding into Zφ(f) , where φ is Euler’s totient function. However, in many
+   147→cryptographic protocols, relations are defined over finite fields Fq . Thus, using cyclotomic rings in
+   148→such protocols requires translating relations from Fq to Rq = R/qR. This translation is nontrivial:
+   149→4 Albert Garreta, Helger Lipmaa, Urmas Luhaäär, and Michal Osadnik
+   150→
+   151→one must preserve the algebraic structure of the original relation in the ring setting. Moreover,
+   152→Fq -based relations (e.g., R1CS or CCS) typically omit norm constraints, which are essential for
+   153→lattice-based security. Accordingly, the translation must also include an appropriate decomposition
+   154→so that the resulting relation over Rq is compatible with Ajtai commitments.
+   155→ A natural idea is to use the Number Theoretic Transform (NTT), which provides a ring isomor-
+   156→ φ(f)
+   157→phism Rq ∼ = Fq (when q splits Φf (X) completely), mapping each ring element to its evaluations
+   158→at the roots of Φf (X). Each coordinate of this embedding lies in Fq , so one can encode field elements
+   159→into individual “slots” of a ring element. For example, consider the cyclotomic ring Z[X]/⟨X 4 + 1⟩
+   160→with q = 17. Since X 4 +1 splits completely modulo 17 as (X −2)(X −4)(X −8)(X −15), the Chinese
+   161→Remainder Theorem gives an isomorphism Rq ∼ = F417 , mapping a polynomial f (X) to its evaluations
+   162→(f (2), f (4), f (8), f (15)). Thus, four field elements a0 , a1 , a2 , a3 ∈ F17 can be “packed” into one ring
+   163→element by finding the unique polynomial f (X) ∈ Rq satisfying f (2) = a0 , f (4) = a1 , f (8) = a2 ,
+   164→f (15) = a3 . Nevertheless, this approach faces several challenges: (1) The NTT embedding is useful
+   165→only when the relation can be “packed” into slots, which typically requires working with multiple
+   166→instances of the relation. This is not always possible. Otherwise, the embedding can impose substan-
+   167→tial overhead, since the relation must be expanded to fill the slots, increasing complexity. (2) Even
+   168→if the Fq witness has small norm, there is no guarantee that the corresponding witness over Rq does,
+   169→which is crucial both for the security of Ajtai commitments and for the efficiency of the commitment
+   170→step. Hence, the Rq relation must be further decomposed to enforce norm bounds. This decomposi-
+   171→tion can be intricate and may inflate proofs and computation, potentially offsetting any gains from
+   172→packing multiple field elements into one ring element. (3) Naively encoding Fq -native relations over
+   173→Rq forces the folding scheme to operate over Rq . This can be wasteful: operations in Rq are far
+   174→more expensive than in Fq , and ring elements are much larger than field elements. It is therefore
+   175→desirable to minimize computation over Rq . (4) The NTT embedding requires a modulus q that
+   176→splits the cyclotomic polynomial Φf (X), which can severely restrict parameter choices and may be
+   177→impractical. Worse, this splitting condition can conflict with other requirements, such as invertibility
+   178→of small-norm elements [LS18,ACX19,BS23] or the existence of large subfields [KLNO24].
+   179→ To overcome these challenges, Nguyen and Setty (Neo, [NS25]) propose a translation from Fq -
+   180→based relations to Rq -based relations that does not rely on the NTT embedding. Neo encodes a
+   181→field element c ∈ Fq as a ring element pc (X) ∈ Rq whose coefficients are the base-b decomposition
+   182→of c, for a suitable b. This resolves issues 1, 2, and 4 above. In addition, Neo performs one folding
+   183→step (analogous to the linearization step in Hypernova [KS24]) entirely over Fq , rather than over
+   184→Rq , where prover time would be substantially higher. This addresses issue 3.
+   185→ Although powerful, Neo [NS25] introduces fairly complex, ad hoc machinery and terminology
+   186→(e.g., matrix commitments and commutative subrings of matrices in place of standard ring-based
+   187→constructions). Building on Neo’s key ideas, we show that the same translation from Fq -based to Rq -
+   188→based relations can be achieved within a simpler framework that works exclusively with cyclotomic
+   189→rings, finite fields, and standard linear maps, yielding a more accessible and modular construction.
+   190→
+   191→1.1 Our contributions
+   192→With this work, we make the following contributions:
+   193→No decomposition and range-check for input accumulated witnesses. As we mentioned,
+   194→all current lattice-based folding schemes from Ξacc × Ξ0 to Ξacc use range-checks to make sure that
+   195→the norm of the accumulated instances stays within some specified bound B. This range-check is
+   196→ultimately applied to both the input witness from the relation Ξ0 and the input witness from the
+   197→ Cyclo: Lightweight Lattice-based Folding via Partial Range Checks 5
+   198→
+   199→accumulated relation Ξacc . In this work we make the key observation that, if one omits the latter
+   200→range-check, then one can ensure that the norm growth of the output accumulated witness only grows
+   201→by a small additive factor (see Section 2.5 in the technical overview for more details).
+   202→ Consequently, we can perform folding without applying any decomposition or range-check to
+   203→the input witness from Ξacc , at the expense of not being able to perform arbitrarily many foldings:
+   204→indeed, at each folding step, the norm grows by a small additive factor, and so after a certain finite
+   205→number ℓfold of folds, the scheme stops being sound. We instantiate our scheme with ℓfold ranging
+   206→from 27 to 220 , which we believe is enough for overwhelmingly many applications. In addition, one
+   207→can use a different folding scheme, say LatticeFold+, once every ℓfold folding steps to “refresh” the
+   208→norm of the accumulated witness.
+   209→No witness decomposition when folding R1CS/CCS constraints over a finite field Fq
+   210→with an accumulated instance. As we discuss later, when seeking to apply our folding scheme
+   211→on R1CS/CCS constraints over Fq , we encode witnesses as cyclotomic ring elements of very low
+   212→norm b (say, b = 2), as done in Neo [NS25]. Thus, the input witness from Ξ0 does not require any
+   213→“decomposition,” unlike those mentioned earlier. In this specific setting, thanks to our key obser-
+   214→vation, we can perform (a bounded number of) foldings by only range-checking the input witness
+   215→from Ξ0 , and then folding with the input accumulated witness. In particular: (1) no decomposi-
+   216→tion step is ever applied to any witness, (2) range-check is only applied to the input witness from
+   217→Ξ0 , and (3) folding is performed in a standard manner between the range-checked input witness
+   218→from Ξ0 and the input accumulated witness. This avoids the most expensive steps of LatticeFold+,
+   219→Neo, and LatticeFold, namely the double commitment for the first two and the decomposition into
+   220→chunks and range-checking for every chunk in the latter. Ultimately, our scheme only requires two
+   221→non-batched4 sum-checks over an extension of Fq for log(mφ)-variate low-degree polynomials. Here,
+   222→m is the length of the packed witness w ∈ Rm q in ring elements.
+   223→
+   224→Remark 1. We stress that the above efficiency gains refer to the folding protocol itself, without
+   225→considering the overhead of recursive verification (i.e., in-circuit verification of the folding scheme).
+   226→In the recursive setting, the benefit analysis is more nuanced. Encoding field elements as low-
+   227→norm polynomials in Rq may increase the witness representation size, since each Fq element is
+   228→represented as a ring element of potentially larger bit-length. However, the verifier does not operate
+   229→on the witness directly, and the absence of decomposition and extension commitment steps means
+   230→that the verifier performs fewer operations throughout the scheme. Therefore, the recursion circuit
+   231→can still be significantly smaller than in folding schemes that require decomposition and double
+   232→commitment. This advantage is further amplified if Cyclo is (trivially) modified so that the public
+   233→instance x (which does appear in the verifier’s circuit) is kept outside the Ajtai commitment and
+   234→can thus be represented as a vector of field elements rather than ring elements.
+   235→
+   236→A new take on witness decomposition + range-check. The fact that we do not need to apply
+   237→any decomposition or range-check to the input accumulated witness has yet another consequence
+   238→for us. Namely, we can design a new “decomposition + range-check step” using a technique we call
+   239→extension commitment (see the technical overview for more details). As we demonstrate, extension
+   240→commitments can be an order of magnitude more efficient than LatticeFold+’s double commitments.
+   241→4
+   242→ Some folding schemes, like LatticeFold, batch many sum-checks, say k, into one, which effectively increases the
+   243→ prover time linearly in k. In LatticeFold in particular, k is the number of chunks produced in the decomposition
+   244→ step
+   245→6 Albert Garreta, Helger Lipmaa, Urmas Luhaäär, and Michal Osadnik
+   246→
+   247→Our extension commitment is then followed by a simple sum-check-based range-check, which, as we
+   248→mentioned, is cheap when one does not need to batch many of them, which is our case.
+   249→ We emphasize that this technique is not usable in a setting where one must apply decomposition
+   250→and range-checking to the accumulated input witness. Hence, our aforementioned key observation
+   251→enables simpler approaches to the decomposition and range-check steps.
+   252→Parameter and efficiency improvements. Our folding scheme is efficient and memory-friendly,
+   253→i.e., we obtain numbers which are orders of magnitude smaller than those from [BC25b]. (See Sec-
+   254→tion 6.1.) In particular, we show that the folding proofs are around 30 KB for practical parameters,
+   255→which is an order of magnitude smaller than those of LatticeFold+.
+   256→ We provide efficiency estimates concerning the most computationally expensive part of our fold-
+   257→ing scheme, i.e., the extension commitment. We also provide an evaluation of the corresponding
+   258→part of LatticeFold+ [BC25b], i.e., double commitment, for comparison.
+   259→Bit-size preserving embedding of Fq into Rq via homomorphic preimages, and reduction
+   260→from R1CS relations over Fq to linear relations over Rq . As we mentioned, Neo’s approach to
+   261→folding R1CS/CCS constraints over Fq relies on relatively non-standard terminology and techniques.
+   262→Building on Neo’s ideas, we reformulate them in terms of cyclotomic rings, finite fields, and linear
+   263→maps, resulting in a construction that requires only standard algebraic tools and no specialized
+   264→matrix-algebraic machinery. Crucially, we observe that Neo can be understood as a scheme that
+   265→works in a hybrid manner over Rq and Fq , and which relies on the additive homomorphism θb :
+   266→Rq → Fq where θb (f (X)) = f (b) to link both structures.
+   267→ We emphasize that Neo’s and our approaches are ultimately equivalent. However, we believe
+   268→this equivalence is far from obvious, and that our simple algebraic viewpoint suggests a general
+   269→framework for integrating lattice-based cryptography in modern proof systems: namely, to use Rq
+   270→solely for commitment purposes, and work otherwise on the base field (or different rings) of interest,
+   271→using a morphism to link both structures.
+   272→An approximately strong sampling set over NTT-friendly cyclotomics. As a side contribu-
+   273→tion, we provide a heuristic analysis of the ternary distribution (i.e., sampling coefficients uniformly
+   274→from {−1, 0, 1}) as an approximate strong sampling set, which is of independent interest. Our analy-
+   275→sis allows the use of more NTT-friendly cyclotomic rings (e.g., splitting down to quadratic extension
+   276→fields with a modulus that fits into a machine word). The results apply to other contexts where
+   277→strong sampling sets are needed, e.g., in lattice-based argument systems [BS23,KLNO25b] and could
+   278→be viewed as a statistical alternative to the analysis of [LS18,ACX19], offering more flexibility in
+   279→the choice of parameters.
+   280→
+   281→2 Technical Overview
+   282→
+   283→Throughout this work, we assume that R is a cyclotomic ring and Zq = Z/q Z. For simplicity of
+   284→exposition, solely in the overview we assume R := Z[X]/⟨X φ + 1⟩, where φ is a power-of-two. Let
+   285→ct be the map that takes a ring element to its constant term. Let Rq := R/qR for a prime q. Let
+   286→cf be the map that takes a ring element to its coefficient vector in Zφ . Let cf−1 be its inverse map
+   287→Zφ → R. Furthermore, we define a map cf∨ (together with its inverse) as cf∨ (a) = (a∨ i )i∈[φ] , where
+   288→a ∈ R and the coefficients of a are (a0 , . . . , aφ−1 ), and a∨
+   289→ i := ai if i = 0, and a ∨ := −a
+   290→ i φ−i otherwise.
+   291→Clearly, ct(a · b) = ⟨cf(a), cf∨ (b)⟩ for any a, b ∈ R, where ⟨·, ·⟩ denotes the inner product. This
+   292→will be generalized to the complete family of cyclotomic rings in the paper, by replacing ct with the
+   293→ Cyclo: Lightweight Lattice-based Folding via Partial Range Checks 7
+   294→
+   295→algebraic trace and formalizing cf∨ as an embedding over the dual basis of structured q-ary lattices.
+   296→We denote ∥·∥ to be the infinity norm on vectors (w.r.t. the coefficient basis). In this overview, we
+   297→conveniently assume that the folding scheme considers a single input relation and leave the (almost
+   298→straightforward) generalization to multiple input relations for the body of the paper.
+   299→
+   300→2.1 LatticeFold(+) Framework for Folding Linear Relations
+   301→
+   302→LatticeFold [BC25a] and LatticeFold+ [BC25b], although significantly different in their technical
+   303→details, share a common framework. We briefly review the framework here to set up the context for
+   304→our technical contributions. For fixed p := (R, a, n, m, q, B), and F ∈ Ra×m
+   305→ q , consider the following
+   306→linear relation:
+   307→
+   308→ ΞFlin := y, w : y ∈ Raq , w ∈ Rm
+   309→ 
+   310→ q , Fw = y mod q, ∥w∥ ≤ B .
+   311→
+   312→This relation is a simplified variant of our relation of interest, which we call the principal linear
+   313→relation (see Section 3 for details). Yet, this simplification allows us to focus on the key aspects of
+   314→the folding process without over-focusing on the complexities of the full relation, which is tailored
+   315→as an output for the reduction for R1CS and is, accordingly, more technically nuanced.
+   316→ Assuming we have w0 and w1 such that (y0 , w0 ) ∈ ΞFlin and (y1 , w1 ) ∈ ΞFlin , one can define
+   317→the folding as a (short) linear combination of w0 and w1 . For simplicity of exposition, we assume
+   318→that the statement matrices are the same, i.e. F is global. Naively folding the two instance witness
+   319→pairs through a random linear combination leads to a new claim (y b ∈ ΞFlin , where y
+   320→ b , w) b = y0 + cy1
+   321→and w b = w0 + cw1 , for c ←$ D such that c is short (i.e. its operator norm is bounded by γD ).
+   322→Unfortunately, although w b is a valid witness for the new relation, i.e., Fw b =y b mod q, the norm of
+   323→the witness is not bounded by B anymore, but rather by BγD .
+   324→ For the security of the folding scheme, one needs to show that the protocol is extractable, i.e., one
+   325→can extract w e 0 and w e 1 such that (y0 , w e 0 ) ∈ ΞFlin and (y1 , we 1 ) ∈ ΞFlin . Unfortunately, such a folding
+   326→scheme is not extractable in general: one can only extract a witness satisfying a relaxed variant of
+   327→ e 0 ) ∈ ΞFlin and (s1 y1 , w
+   328→the relation, i.e., (s0 y0 , w e 1 ) ∈ ΞFlin for short s0 , s1 ∈ Rq (which we call slack
+   329→factors, also known as short denominators of the witness).
+   330→ In more detail, one extracts the witnesses w e 0 and we 1 in the following way. One runs the prover
+   331→twice to get (w b0 = y0 + c0 y1 ) for a short c0 ∈ Rq , and (w
+   332→ b 0, y b1 = y0 + c1 y1 ) for some c1 ∈ Rq .
+   333→ b 1, y
+   334→Wlog, assume that c0 ̸= c1 (as the challenge space is large). Then, w e 1 = (wb0 − w b 1 )/(c0 − c1 ) and
+   335→w
+   336→e0 = w b 0 − c0 · w
+   337→ e 1 so that Fw e 0 = y0 and Fw e 1 = y1 , yet w e 0, we 1 are not short as they have a short
+   338→denominator c′ := c0 − c1 . This denominator is prohibitive for the extraction of the witnesses as it
+   339→grows exponentially with the number of folding rounds.
+   340→ To address this issue, LatticeFold [BC25a] and LatticeFold+ [BC25b] invoke two additional
+   341→protocols: a decomposition and a norm check, which can be pictorially represented as follows (or as
+   342→some variation of it):
+   343→ norm-check
+   344→ lin )ℓ −−−−−−→ (Ξ lin )ℓ ′ )
+   345→ (Ξacc acc fold lin decomposition
+   346→ lin
+   347→ −−→ Ξfolded −−−−−−−−→ (Ξoutput )ℓ . (1)
+   348→ lin norm-check
+   349→ lin ′
+   350→ Ξinput −−−−−−→ Ξinput
+   351→
+   352→ lin
+   353→ In words, one considers an input relation Ξinput and an input “accumulated” relation Ξacc lin (i.e.
+   354→
+   355→the relation after several folding steps) and applies the norm check to both relations. This norm
+   356→serves as a “checkpoint” for the extraction, which effectively resets the norm to the precise bound of
+   357→8 Albert Garreta, Helger Lipmaa, Urmas Luhaäär, and Michal Osadnik
+   358→
+   359→the original relation. Then, one applies the folding step to obtain a new folded relation. To address
+   360→the growth of the norm in the folding direction (also called the “correctness” direction), as the last
+   361→step the folded witness gets decomposed into ℓ “digits,” or “chunks,” so that the norm of each digit
+   362→is the same as that of the original relation. In LatticeFold+, ℓ = 2, so the “accumulated” relation
+   363→is a pair of relations, the folded relation is a single relation, and the output relation is again a pair
+   364→of relations. The output serves as an “accumulated” relation for the next round.
+   365→ The technical difficulties of previous works are the construction of the decomposition and norm-
+   366→check protocols, which have been addressed using, e.g., so-called “monomial” decomposition in
+   367→LatticeFold+ [BC25b], or sum-check on many grand-product constraints in LatticeFold [BC25a].
+   368→See Section 1.1 for more details on these approaches.
+   369→
+   370→2.2 New Framework: Amortized Norm-Refreshing Folding Scheme
+   371→
+   372→In the current paper, we propose a new folding framework, an amortized norm-refreshing folding
+   373→scheme. The main idea is to avoid the norm check and decomposition protocols on the “accumulated”
+   374→relations, and only apply them on the input relation. Pictorially, we represent the framework as
+   375→follows:
+   376→ lin )
+   377→ Ξacc
+   378→ fold lin
+   379→ decomposition* ′ norm-check ′′
+   380→ −−→ Ξoutput ,
+   381→ lin lin
+   382→ Ξinput −−−−−−−−−→ Ξinput −−−−−−→ Ξinput lin
+   383→
+   384→ ′
+   385→ lin
+   386→where the decomposition step Ξinput lin
+   387→ → Ξinput is not always required: importantly, when using our
+   388→scheme to fold R1CS/CCS constraints over Fq , the decomposition step can be skipped (see Remark 1
+   389→for a discussion of the implications for recursive verification).
+   390→ Besides the appealing property of sometimes being able to skip the decomposition step, this
+   391→framework has an additional benefit: by exploiting the fact that the input accumulated witnesses
+   392→do not need to be checked at all, we can construct a tailored lightweight decomposition and norm-
+   393→check procedure, which is not usable in the previous lattice-based folding framework of Eq. (1).
+   394→ As a downside, since the norm of the input “accumulated” witness is not checked anymore, the
+   395→norm of the accumulated witness grows with the number of folding rounds. Our key observation is
+   396→that, despite this, the growth is only by an additive factor (instead of multiplicative) per folding
+   397→step, as we will explain in Section 2.5. Therefore, upon imposing a bound on the number of folding
+   398→rounds, the obtained norm growth is acceptable. Notably, for the hardness of the underlying SIS
+   399→problem, parameters are only mildly affected by the number of folding rounds. Concretely, we impose
+   400→a bound on the number of folding rounds to be relatively large, e.g., 210 , which is acceptable in
+   401→practice.
+   402→
+   403→Combination with previous frameworks. The limitation on the number of folding rounds might
+   404→be unsatisfactory in some applications. We stress that the new folding framework can be naturally
+   405→combined with the previous lattice-based framework. I.e., we can construct a hybrid folding scheme,
+   406→where we apply the other frameworks every k rounds, and our framework in between. That way,
+   407→we can balance the efficiency and the norm growth. This hybrid scheme is particularly feasible,
+   408→while considering the connection to the previous framework of LatticeFold+ [BC25b], where the
+   409→linear relation supported by the folding scheme is almost exactly the relation we consider (subject
+   410→to notational details). This is similar to bootstrapping in FHE, except that LatticeFold+ is quite
+   411→efficient.
+   412→ Cyclo: Lightweight Lattice-based Folding via Partial Range Checks 9
+   413→
+   414→2.3 Building Blocks of Cyclo
+   415→The main building blocks of our new amortized norm-refreshing folding scheme Cyclo are the “ex-
+   416→tension commitment” protocol and the “range check” protocol. We emphasize again that, for the
+   417→purposes of folding R1CS/CCS instances over a finite field, the extension commitment step can be
+   418→fully skipped (cf. Remark 1).
+   419→Extension Commitment. The extension commitment protocol commits to the decomposition
+   420→v ∈ Rmℓ q of the witness w ∈ Rm q of the input relation with a delayed proof of its correctness;
+   421→thus, it is a reduction of knowledge. Here, B is the large bound, b is the base of the decompo-
+   422→sition, and ℓ := log2b 2B. (Note that v has higher dimension than w, motivating us to keep ℓ
+   423→small.) Contrary to the general idea of decomposing witnesses into multiple linear relations (i.e.
+   424→“horizontally”) [KLNO24,KLNO25a,BC25b,BC25a], we decompose the witness “vertically.” Thus,
+   425→it remains captured by a single linear relation, which is an important optimization for the commu-
+   426→nication overhead.
+   427→ When the witness of the input relation is already of low norm, this step can be skipped altogether.
+   428→If configured properly, this is the case when using Cyclo to fold R1CS/CCS instances over a finite
+   429→field (cf. Section 2.6).
+   430→ The new extension commitment protocol Π ext is parameterized by public random (but fixed)
+   431→ ′
+   432→matrices F ∈ Ra×m q and R ∈ Rqa ×mℓ (viewed as Ajtai commitments with ranks a and a′ , respec-
+   433→tively), and a challenge space (sampling set) C ⊆ Rq . Wlog, assume ℓ := log2b 2B and ℓC := log2 a
+   434→are integers. We define tensor(b c; j))j∈{0,1}ℓC ∈ Raq for the standard indicator (Lagrange)
+   435→ c) := (eq(b
+   436→polynomials eq.
+   437→ Π ext works as follows (see Figure 2 for details):
+   438→1. The prover holds a witness w ∈ Rm q such that Fw = y mod q and ∥w∥ ≤ B. Here, y ∈ Rq . The
+   439→ a
+   440→ ℓ−1
+   441→ prover decomposes w into ℓ “digits” wi ∈ Rm i
+   442→ P
+   443→ q such that w = i=0 (2b) wi and ∥wi ∥ < b for all
+   444→ T )T ∈ Rmℓ .
+   445→ i. Let vT := (w0T , . . . , wℓ−1 q
+   446→ ′
+   447→2. The prover sends a commitment t = Rv ∈ Raq to v.
+   448→3. The verifier samples b c := (ĉ1 , . . . , ĉℓC −1 ) ← C ℓC and defines c := tensor(b c).
+   449→4. The prover and the verifier define an additional 5 constraint to ensure that f T v = ⟨c, y⟩ mod
+   450→ q, where f := c ((2b) , (2b) , . . . , (2b) ) ⊗ F . Indeed, (((2b) , (2b) , . . . , (2b)ℓ−1 ) ⊗ F)v =
+   451→ T T 0 1 ℓ−1 0 1
+   452→
+   453→ ((2b)0 F, . . . , (2b)ℓ−1 F)v = F( ℓ−1 i T
+   454→ P
+   455→ i=0 (2b) wi ) = Fw = y and thus f v = ⟨c, y⟩.
+   456→ The constraint guarantees that the committed v is indeed a valid decomposition of a witness of
+   457→ the input relation. The new constraint is appended to the input constraint so that
+   458→  
+   459→ 
+   460→ R v = t
+   461→ f T ⟨c,y⟩ mod q
+   462→
+   463→ serves as a new constraint with a new witness v.
+   464→ We designed Π ext to reduce the norm of the witness in the folding direction, making the range
+   465→check (that has a linear complexity in b) more efficient. Π ext is the most expensive part of Cyclo,
+   466→requiring a′ mℓ = a′ m log2b 2B ring element multiplications. Importantly, the choice of b provides a
+   467→trade-off between the efficiencies of the extension commitment and the range check.
+   468→Range Check. The range check is a reduction of knowledge to prove that the witness w ∈ Rm q of
+   469→the input relation is indeed small, i.e., ∥w∥ ≤ B for some B. It reduces it to a linear constraint that
+   470→5
+   471→ Note that the decomposition is done in the base 2b as opposed to b as we take advantage of the sign.
+   472→10 Albert Garreta, Helger Lipmaa, Urmas Luhaäär, and Michal Osadnik
+   473→
+   474→is appended to the list of input constraints. Our range check Π range is the same as LatticeFold’s.
+   475→However, LatticeFold applies it to many witness chunks, while we apply it to only one witness vector.
+   476→Let ℓ := ⌈log2 (φm)⌉. Let MLE[z] be the multilinear extension of z ∈ Fmφ q over a Boolean hypercube,
+   477→i.e., the vector of evaluations of MLE[z] on {0, 1}ℓ is equal to z. Let f (X) = MLE[cf(w)], Q with f (x) =
+   478→cf(w)x for x ∈ {0, 1}ℓ . We use the standard observation that ∥w∥ ≤ P B iff g(X) := B i=−B (f (X)−i)
+   479→vanishes on the hypercube, which holds iff MLE[(g(j))j∈{0,1}ℓ ] = j∈{0,1}ℓ g(j)eq(j, X) is a zero
+   480→polynomial. The verifier uses Schwartz-Zippel and sum-check to test the latter.
+   481→ More precisely, Π range works as follows (see Figure 1 for details):
+   482→1. The verifier Q
+   483→ samples a random η.
+   484→2. Let fˆ(X) = B i=−B (f (X) − i) · eq(X, η). The prover and the verifier use the sum-check to reduce
+   485→ the statement that x∈{0,1}ℓ fˆ(x) = 0 to the statement that fˆ(u) = s for a random challenge
+   486→ P
+   487→
+   488→ u ∈ Zℓq .
+   489→3. The prover sends t = f (u) to the verifier, who checks B
+   490→ Q
+   491→ i=−B (t − i) · eq(u, η) = s (assuming t is
+   492→ correctly computed).
+   493→4. The prover delays the proof that t = f (u) by appending an additional row to the relation
+   494→ to show that ⟨tensor(u), cf(w)⟩ = MLE[w](u) = t. In the ring setting, this translates to
+   495→ ⟨cf−1
+   496→ ∨ (u), w⟩ = t̃ for a t̃ ∈ Rq such that ct(t̃) = t.
+   497→
+   498→This induces a standard sum-check soundness error. To reduce the soundness error, we execute
+   499→Π range over an extension field Fqe .
+   500→
+
+[showing lines 1-500 of 2589; use offset=501 with limit to continue reading]
