@@ -6,3 +6,4 @@ download/
 db/
 *.db
 .env
+tool-results/
