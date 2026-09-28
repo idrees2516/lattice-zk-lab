@@ -64,6 +64,9 @@ class RingSCProof:
     degree: int
     # final per-table bound values, flat across all groups (in group order)
     final_values: List = field(default_factory=list)
+    # the verifier's challenge point (rho_0..rho_{mu-1}) — carried so callers
+    # can evaluate their public tables at it without replaying the transcript
+    point: List = field(default_factory=list)
 
 
 class RingSC:
@@ -84,7 +87,14 @@ class RingSC:
         self.degree = max(len(g.tables) for g in groups)
 
     # ------------------------------------------------------------------ setup #
-    def combiners(self, transcript) -> List[RingElt]:
+    def combiners(self, transcript, explicit: Sequence[RingElt] | None = None) -> List[RingElt]:
+        """Combiners: drawn from the transcript by default, or EXPLICIT
+        (protocol-supplied batching weights, e.g. RoKoko's eq(bin(i), gamma)
+        claim combiners — must be identical on both sides)."""
+        if explicit is not None:
+            if len(explicit) != len(self.groups):
+                raise ValueError("explicit combiner count mismatch")
+            return list(explicit)
         return [
             self.ring.challenge(transcript, label=f"ringsc:alpha{g}")
             for g in range(len(self.groups))
@@ -97,13 +107,14 @@ class RingSC:
         return acc
 
     # ------------------------------------------------------------------ prover #
-    def prove(self, transcript) -> RingSCProof:
+    def prove(self, transcript, explicit_combiners: Sequence[RingElt] | None = None) -> RingSCProof:
         """Run the full sumcheck; challenges drawn from ``transcript``.
         Returns the proof (round messages + final openings)."""
-        alphas = self.combiners(transcript)
+        alphas = self.combiners(transcript, explicit_combiners)
         # per-group bound table state
         bound = [ [list(t) for t in g.tables] for g in self.groups ]
         round_polys: List[List] = []
+        point: List[RingElt] = []
         mus = self.mu
         for i in range(mus):
             # round polynomial = sum_g alpha^g * g_i^group(X)
@@ -135,18 +146,20 @@ class RingSC:
             for c in acc:
                 transcript.absorb_ring(c)
             rho = self.ring.challenge(transcript, label=f"ringsc:rho{i}")
+            point.append(rho)
             bound = [[bind_table(T, rho) for T in tables] for tables in bound]
         final_values = [T[0] for tables in bound for T in tables]
-        return RingSCProof(round_polys=round_polys, degree=self.degree, final_values=final_values)
+        return RingSCProof(round_polys=round_polys, degree=self.degree,
+                           final_values=final_values, point=point)
 
     # ---------------------------------------------------------------- verifier #
-    def verify(self, proof: RingSCProof, transcript) -> Tuple[bool, List, RingElt]:
+    def verify(self, proof: RingSCProof, transcript, explicit_combiners: Sequence[RingElt] | None = None) -> Tuple[bool, List, RingElt]:
         """Verify round messages against the combined claim; returns
         (ok, final_values, last_claim).  The caller must check the final
         values against its own opening logic (terminal check).  Verification
         only needs the combined claim, mu and degree — not the witness
         tables."""
-        alphas = self.combiners(transcript)
+        alphas = self.combiners(transcript, explicit_combiners)
         claim = self.combined_claim(alphas)
         return verify_round_polys(
             proof.round_polys, claim, self.mu, self.degree, self.ring, transcript

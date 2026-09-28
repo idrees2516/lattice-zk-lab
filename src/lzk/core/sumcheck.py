@@ -54,9 +54,13 @@ def eq_eval(a: Sequence[int], b: Sequence[int]) -> int:
 
 def mle_eval(table: Sequence, point: Sequence[int]):
     """Evaluate the multilinear extension of ``table`` (length 2^mu,
-    MSB-first variable order) at ``point`` (mu coordinates)."""
+    MSB-first variable order) at ``point`` (mu coordinates).  A length-1
+    table is a constant (its MLE is the value at any point) — used by the
+    RoKoko terminal check to substitute sent evaluations."""
     cur = list(table)
     for r in point:
+        if len(cur) == 1:
+            break  # constant table
         half = len(cur) // 2
         nxt = []
         for i in range(half):
