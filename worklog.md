@@ -261,3 +261,31 @@ Stage Summary:
 - Wave 7 (all priority items P0-4/P0-5, A1-A5, W1-W5, R1-R5) + Wave 8
   (all 10 items) complete and delivered at
   https://github.com/idrees2516/lattice-zk-lab
+
+---
+Task ID: 10
+Agent: main (Super Z)
+Task: container restore + verification (session 2026-09-29)
+
+Work Log:
+- Fresh container detected again (only scaffold initial commit + upload/ PDFs, no code);
+  user supplied GitHub PAT (scopes: repo, workflow) -> account idrees2516.
+- Verified remote intact: 10 commits on main (HEAD 89f5dbb), 4/4 CI runs green,
+  68 tracked files.
+- Restored into /home/z/my-project: git remote add origin (clean URL, no token)
+  + fetch + reset --mixed origin/main + checkout -- . ; local main == 89f5dbb,
+  working tree clean; PDFs kept on disk untracked (remote .gitignore covers
+  upload/, papers_txt/, .env, download/).
+- Recreated papers_txt/ from all 15 upload PDFs via pdftotext -layout
+  (52,604 lines total; hyperwolf.txt confirmed as the real 2020-line paper
+  from the previously recovered 611 KB PDF, not the 404 stub).
+- Environment verified identical to build session: Python 3.12.14,
+  numpy 2.1.3, sympy 1.14.0, pytest 9.0.2.
+- Full pytest suite: 8/8 modules green in 4.67s (PYTHONPATH=src).
+- Push for this session performed with token passed transiently in the push
+  URL only; origin remote URL kept token-free.
+
+Stage Summary:
+- Project fully restored and verified in the fresh container; local state ==
+  delivered GitHub state. Ready to continue with any next-wave work
+  (candidates: remaining gap-ledger items, benchmark expansion, or new papers).
